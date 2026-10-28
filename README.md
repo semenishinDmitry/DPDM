@@ -82,13 +82,24 @@ Python own their memory (trajectories are moved without copying).
 ## GUI
 
 ```bash
-pip install ".[gui]"
-dustppd-gui            # or: python -m dustppd.gui
+pip install .
+dustppd-gui            # or: python -m dustppd.gui   [--port 8765] [--no-browser]
 ```
 
-Load the reference case or a TOML file, edit parameters, choose the solver, run/cancel
-(the window stays responsive), inspect plots (r(t), z(r), |v_r|(r), a(r), St, Re, ...),
-the summary and solver statistics, export CSV, save the configuration.
+A local server (standard library only, bound to 127.0.0.1) opens a tab in the default
+browser. Tabs:
+
+- **Trajectory**: scenario presets (paper reference case, micron grain with growth,
+  dead-zone trap, trap with fossil field, charged grain), all parameters, run/cancel with
+  progress, summary cards, four selectable plots (r(t), z(r), v_r, a, St, Re, beta_K,
+  Hall, Z, ...), disk profiles with stationary drift and trap markers, solver statistics,
+  CSV export, TOML load/save.
+- **Mixing**: stochastic vertical mixing (SDE ensemble) against the exact stationary
+  solution and the Dubrulle formula.
+- **Model and methods**: the equations and a short description of the numerical methods.
+
+Plots are drawn in the page (zoom by dragging, double-click to reset, hover for values,
+SVG download); no internet connection is needed. Ctrl/Cmd+Enter starts a run.
 
 ## C++ API
 

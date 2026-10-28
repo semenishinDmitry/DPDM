@@ -68,7 +68,7 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           python -c "import dustppd; print(dustppd.__file__, dustppd.available_backends())"
-          python -m pytest "$GITHUB_WORKSPACE/tests/python" -q -k "not gui"
+          python -m pytest "$GITHUB_WORKSPACE/tests/python" -q
 
   cuda-compile:
     # No GPU runners: this only checks that the experimental CUDA code compiles.

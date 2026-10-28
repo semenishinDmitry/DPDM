@@ -19,7 +19,7 @@ include/dpd/dust/  physical model
   run.hpp            run(), run_ensemble(), summaries (events -> drift/settling times)
   io.hpp             CSV / JSON output
 apps/              dustppd CLI
-python/            pybind11 module dustppd._core + package (gui.py)
+python/            pybind11 module dustppd._core + package (gui.py: browser GUI server, web/: page)
 tests/cpp, tests/python, tests/reference (independent SciPy model, reference generator)
 bench/             benchmark harness
 scripts/           compare_paper.py
@@ -48,7 +48,7 @@ CMake targets: `dpd_ode` (core), `dpd_dust` (model + config), `dustppd` (CLI),
   per thread with no shared mutable state (results are bitwise identical to serial runs,
   tested). Cancellation/progress use atomics.
 - **Dependencies** (pinned, fetched by CMake): toml++ 3.4.0 (MIT, parsing only),
-  Catch2 3.7.1 (BSL, tests). Python: pybind11, numpy; matplotlib for GUI/plots.
+  Catch2 3.7.1 (BSL, tests). Python: pybind11, numpy; matplotlib only for the scripts. The GUI uses the standard library.
 
 ## Adding another ODE system
 

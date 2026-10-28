@@ -12,7 +12,7 @@ license = { text = "MIT" }
 dependencies = ["numpy>=1.21"]
 
 [project.optional-dependencies]
-gui = ["matplotlib>=3.5"]
+gui = []  # kept for compatibility: the browser GUI needs no extra packages
 test = ["pytest>=7", "scipy>=1.9", "matplotlib>=3.5"]
 
 [project.scripts]

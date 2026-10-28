@@ -1,396 +1,451 @@
-"""Tk/matplotlib GUI for configuring, running, inspecting and exporting dust-model runs.
+"""Browser GUI for configuring, running and inspecting dust-model runs.
 
-Launch:  python -m dustppd.gui   (or the ``dustppd-gui`` console script)
+Launch:  dustppd-gui   (or ``python -m dustppd.gui``)
 
-The simulation runs in a worker thread; the C++ core releases the GIL, so the
-GUI stays responsive. Cancellation is cooperative (checked after every step).
+A small HTTP server (standard library only) listens on 127.0.0.1 and the default
+browser opens the page. Simulations run in worker threads; the C++ core releases
+the GIL, so the page stays responsive and runs can be cancelled.
+
+Options: ``--port N`` (default: a free port), ``--no-browser``.
 """
 from __future__ import annotations
 
+import argparse
+import io
+import json
 import math
-import queue
+import os
 import threading
-import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
-from typing import Any, Dict, Optional
+import uuid
+import webbrowser
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from typing import Any, Dict, List, Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 
 import dustppd as dp
 
-try:
-    import matplotlib
+WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 
-    matplotlib.use("TkAgg")
-    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolbar2Tk
-    from matplotlib.figure import Figure
-except ImportError as e:  # pragma: no cover
-    raise SystemExit("dustppd GUI needs matplotlib: pip install matplotlib") from e
-
-# (label, RunConfig attribute, type)
-FIELDS = [
-    ("Particle", [
-        ("initial radius a_init [cm]", "a_init_cm", float),
-        ("material density rho_d [g/cm^3]", "rho_d", float),
-        ("initial r [au]", "r_init_au", float),
-        ("initial z [H(r_init)]", "z_init_H", float),
-        ("initial v_r [cm/s]", "vr_init_cms", float),
-        ("initial v_z [cm/s]", "vz_init_cms", float),
+# Parameter form: (group, [(RunConfig attribute, label, unit, kind, choices)]).
+# kind: "float" | "int" | "bool" | "choice" | "path"
+FIELDS: List[Tuple[str, List[Tuple[str, str, str, str, Optional[List[str]]]]]] = [
+    ("Частица", [
+        ("a_init_cm", "начальный радиус a", "см", "float", None),
+        ("rho_d", "плотность вещества ρ_d", "г/см³", "float", None),
+        ("r_init_au", "начальный радиус орбиты r₀", "а.е.", "float", None),
+        ("z_init_H", "начальная высота z₀", "H(r₀)", "float", None),
+        ("vr_init_cms", "начальная v_r", "см/с", "float", None),
+        ("vz_init_cms", "начальная v_z", "см/с", "float", None),
     ]),
-    ("Physics", [
-        ("dust-to-gas ratio Y_d", "dust_to_gas", float),
-        ("mean molecular weight mu", "mu", float),
-        ("collision cross-section [cm^2]", "sigma_mol_cm2", float),
-        ("inner edge r_in [au]", "r_in_au", float),
-        ("settling band eps", "settle_eps", float),
-        ("t_end [yr]", "t_end_yr", float),
+    ("Физика", [
+        ("drag", "закон трения", "", "choice", ["both", "epstein", "stokes"]),
+        ("coagulation", "коагуляция (рост, ур. 10)", "", "bool", None),
+        ("sedimentation", "оседание (движение по z)", "", "bool", None),
+        ("dust_to_gas", "доля пыли Y_d", "", "float", None),
+        ("mu", "молекулярный вес μ", "", "float", None),
+        ("sigma_mol_cm2", "сечение молекул σ", "см²", "float", None),
+        ("r_in_au", "внутренняя граница r_in", "а.е.", "float", None),
+        ("settle_eps", "полоса осаждения ε", "z₀", "float", None),
+        ("t_end_yr", "время счёта t_end", "лет", "float", None),
     ]),
-    ("Disk", [
-        ("alpha", "alpha", float),
-        ("Mdot [1e-8 Msun/yr]", "mdot", float),
-        ("M_star [Msun]", "mstar", float),
-        ("u_phi / v_K (analytic beta)", "vphi2vk", float),
-        ("perturbation amplitude A", "bump_amplitude", float),
-        ("perturbation radius [au]", "bump_r_au", float),
-        ("perturbation width [au]", "bump_width_au", float),
+    ("Диск", [
+        ("disk_model", "модель диска", "", "choice", ["analytic", "self_consistent", "tabulated_beta", "tabulated"]),
+        ("table_path", "файл таблицы (для tabulated)", "", "path", None),
+        ("alpha", "α", "", "float", None),
+        ("mdot", "Ṁ", "10⁻⁸ M☉/год", "float", None),
+        ("mstar", "M★", "M☉", "float", None),
+        ("vphi2vk", "u_φ / v_K (для analytic)", "", "float", None),
+        ("perturbation", "возмущение", "", "choice", ["none", "gaussian", "dead_zone_edge"]),
+        ("bump_amplitude", "амплитуда A", "", "float", None),
+        ("bump_r_au", "положение r_b", "а.е.", "float", None),
+        ("bump_width_au", "ширина w", "а.е.", "float", None),
     ]),
-    ("Fossil field / charge", [
-        ("B0 at 1 au [G]", "B0_G", float),
-        ("field exponent", "field_exponent", float),
-        ("B_r / B_z", "br_over_bz", float),
-        ("ion mass [amu]", "ion_mass_amu", float),
+    ("Поле и заряд", [
+        ("B0_G", "B₀ на 1 а.е.", "Гс", "float", None),
+        ("field_exponent", "показатель p (B ∝ r⁻ᵖ)", "", "float", None),
+        ("br_over_bz", "B_r / B_z", "", "float", None),
+        ("magnetic_tension", "магнитное натяжение в β", "", "bool", None),
+        ("charge", "заряд пылинки", "", "choice", ["none", "oml"]),
+        ("ion_mass_amu", "масса иона", "а.е.м.", "float", None),
     ]),
-    ("Solver", [
-        ("rtol", "rtol", float),
-        ("max steps", "max_steps", int),
+    ("Решатель", [
+        ("method", "метод", "", "choice", ["auto", "dopri5", "bdf", "rk4"]),
+        ("linear_solver", "линейный решатель", "", "choice", ["dense_lu", "gmres"]),
+        ("rtol", "относительный допуск rtol", "", "float", None),
+        ("max_steps", "максимум шагов", "", "int", None),
     ]),
 ]
 
-PLOTS = {
-    "r(t)": ("t_yr", "r_au", "log", "log"),
-    "z(r)": ("r_au", "z_au", "linear", "linear"),
-    "z(t)": ("t_yr", "z_au", "log", "linear"),
-    "|v_r|(r)": ("r_au", "vr_cms", "log", "log"),
-    "a(r)": ("r_au", "a_cm", "log", "log"),
-    "a(t)": ("t_yr", "a_cm", "log", "log"),
-    "St(r)": ("r_au", "St", "log", "log"),
-    "Re(r)": ("r_au", "Re", "log", "log"),
-    "beta(r)": ("r_au", "beta", "log", "linear"),
-    "Hall(r)": ("r_au", "hall", "log", "log"),
+PRESETS = {
+    "reference": ("Опорный случай статьи: 1 м из 100 а.е.", []),
+    "micron_growth": ("1 мкм с 1 а.е., рост и дрейф", [
+        "particle.a_init_cm=1e-4", "particle.r_init_au=1", "physics.coagulation=true",
+        "physics.sedimentation=false"]),
+    "dead_zone_trap": ("Ловушка на краю мёртвой зоны: 1 см с 15 а.е.", [
+        "particle.a_init_cm=1", "particle.r_init_au=15", "physics.sedimentation=false",
+        "run.t_end_yr=3e6", 'disk.model="self_consistent"', 'disk.perturbation="dead_zone_edge"',
+        "disk.bump_amplitude=2", "disk.bump_r_au=10", "disk.bump_width_au=1"]),
+    "trap_with_field": ("Та же ловушка с остаточным полем B₀ = 2 Гс", [
+        "particle.a_init_cm=1", "particle.r_init_au=15", "physics.sedimentation=false",
+        "run.t_end_yr=3e6", 'disk.model="self_consistent"', 'disk.perturbation="dead_zone_edge"',
+        "disk.bump_amplitude=2", "disk.bump_r_au=10", "disk.bump_width_au=1",
+        "field.B0_G=2", "field.exponent=1.25", "field.br_over_bz=0.5"]),
+    "charged": ("Заряженная пылинка 1 мкм в поле 1 Гс", [
+        "particle.a_init_cm=1e-4", "particle.r_init_au=1", 'physics.charge="oml"',
+        "field.B0_G=1", "field.exponent=1.25", "field.br_over_bz=0.5", "run.t_end_yr=2e4"]),
 }
 
+MAX_POINTS = 4000
 
-class App(tk.Tk):
-    def __init__(self) -> None:
-        super().__init__()
-        self.title("dustppd - dust dynamics in protoplanetary disks")
-        self.geometry("1280x820")
-        self.cfg: dp.RunConfig = dp.reference_config()
-        self.result: Optional[Dict[str, Any]] = None
-        self.control: Optional[dp.RunControl] = None
-        self.worker: Optional[threading.Thread] = None
-        self.done_q: "queue.Queue[Any]" = queue.Queue()
-        self.vars: Dict[str, tk.Variable] = {}
-        self._build()
-        self._load_into_widgets()
 
-    # ------------------------------------------------------------- layout --
-    def _build(self) -> None:
-        left = ttk.Frame(self, padding=6)
-        left.pack(side=tk.LEFT, fill=tk.Y)
-        right = ttk.Frame(self, padding=6)
-        right.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
+def _clean(x: Any) -> Any:
+    """JSON-safe copy: NaN / inf -> None, numpy -> python."""
+    if isinstance(x, dict):
+        return {k: _clean(v) for k, v in x.items()}
+    if isinstance(x, (list, tuple)):
+        return [_clean(v) for v in x]
+    if isinstance(x, np.ndarray):
+        return _clean(x.tolist())
+    if isinstance(x, (np.floating, float)):
+        v = float(x)
+        return v if math.isfinite(v) else None
+    if isinstance(x, np.integer):
+        return int(x)
+    return x
 
-        bar = ttk.Frame(left)
-        bar.pack(fill=tk.X)
-        ttk.Button(bar, text="Reference case", command=self.on_reference).pack(side=tk.LEFT)
-        ttk.Button(bar, text="Load...", command=self.on_load).pack(side=tk.LEFT)
-        ttk.Button(bar, text="Save...", command=self.on_save).pack(side=tk.LEFT)
 
-        for section, fields in FIELDS:
-            box = ttk.LabelFrame(left, text=section, padding=4)
-            box.pack(fill=tk.X, pady=3)
-            for label, attr, typ in fields:
-                row = ttk.Frame(box)
-                row.pack(fill=tk.X)
-                ttk.Label(row, text=label, width=30).pack(side=tk.LEFT)
-                v = tk.StringVar()
-                ttk.Entry(row, textvariable=v, width=14).pack(side=tk.RIGHT)
-                self.vars[attr] = v
-            if section == "Physics":
-                row = ttk.Frame(box)
-                row.pack(fill=tk.X)
-                ttk.Label(row, text="drag law", width=30).pack(side=tk.LEFT)
-                self.vars["drag"] = tk.StringVar()
-                ttk.Combobox(row, textvariable=self.vars["drag"], values=["both", "epstein", "stokes"], width=11,
-                             state="readonly").pack(side=tk.RIGHT)
-                self.vars["coagulation"] = tk.BooleanVar()
-                self.vars["sedimentation"] = tk.BooleanVar()
-                ttk.Checkbutton(box, text="coagulation (Eq. 10)", variable=self.vars["coagulation"]).pack(anchor=tk.W)
-                ttk.Checkbutton(box, text="sedimentation (2D)", variable=self.vars["sedimentation"]).pack(anchor=tk.W)
-            if section == "Disk":
-                for label, attr, values in (("disk model", "disk_model",
-                                             ["analytic", "self_consistent", "tabulated_beta", "tabulated"]),
-                                            ("perturbation", "perturbation", ["none", "gaussian", "dead_zone_edge"])):
-                    row = ttk.Frame(box)
-                    row.pack(fill=tk.X)
-                    ttk.Label(row, text=label, width=30).pack(side=tk.LEFT)
-                    self.vars[attr] = tk.StringVar()
-                    ttk.Combobox(row, textvariable=self.vars[attr], values=values, width=14,
-                                 state="readonly").pack(side=tk.RIGHT)
-            if section == "Fossil field / charge":
-                row = ttk.Frame(box)
-                row.pack(fill=tk.X)
-                ttk.Label(row, text="grain charge", width=30).pack(side=tk.LEFT)
-                self.vars["charge"] = tk.StringVar()
-                ttk.Combobox(row, textvariable=self.vars["charge"], values=["none", "oml"], width=11,
-                             state="readonly").pack(side=tk.RIGHT)
-            if section == "Disk":
-                row = ttk.Frame(box)
-                row.pack(fill=tk.X)
-                self.vars["beta_table"] = tk.StringVar()
-                ttk.Button(row, text="beta table...", command=self.on_beta).pack(side=tk.LEFT)
-                ttk.Button(row, text="clear", command=lambda: self.vars["beta_table"].set("")).pack(side=tk.LEFT)
-                ttk.Label(box, textvariable=self.vars["beta_table"], wraplength=300).pack(anchor=tk.W)
-            if section == "Solver":
-                for label, attr, values in (("method", "method", ["auto", "dopri5", "bdf", "rk4"]),
-                                            ("linear solver", "linear_solver", ["dense_lu", "gmres"])):
-                    row = ttk.Frame(box)
-                    row.pack(fill=tk.X)
-                    ttk.Label(row, text=label, width=30).pack(side=tk.LEFT)
-                    self.vars[attr] = tk.StringVar()
-                    ttk.Combobox(row, textvariable=self.vars[attr], values=values, width=11,
-                                 state="readonly").pack(side=tk.RIGHT)
+def config_to_params(cfg: dp.RunConfig) -> Dict[str, Any]:
+    out: Dict[str, Any] = {}
+    for _, fields in FIELDS:
+        for attr, _l, _u, _k, _c in fields:
+            if attr == "table_path":
+                out[attr] = cfg.beta_table if cfg.disk_model == "tabulated_beta" else cfg.profile_table
+            else:
+                out[attr] = getattr(cfg, attr)
+    return _clean(out)
 
-        run_bar = ttk.Frame(left)
-        run_bar.pack(fill=tk.X, pady=6)
-        self.btn_run = ttk.Button(run_bar, text="Run", command=self.on_run)
-        self.btn_run.pack(side=tk.LEFT)
-        self.btn_cancel = ttk.Button(run_bar, text="Cancel", command=self.on_cancel, state=tk.DISABLED)
-        self.btn_cancel.pack(side=tk.LEFT)
-        ttk.Button(run_bar, text="Export CSV...", command=self.on_export).pack(side=tk.LEFT)
-        self.progress = ttk.Progressbar(left, maximum=1.0, length=300)
-        self.progress.pack(fill=tk.X)
-        self.status = tk.StringVar(value="ready")
-        ttk.Label(left, textvariable=self.status, wraplength=320).pack(anchor=tk.W)
 
-        nb = ttk.Notebook(right)
-        nb.pack(fill=tk.BOTH, expand=True)
-        plot_tab = ttk.Frame(nb)
-        nb.add(plot_tab, text="Plots")
-        self.fig = Figure(figsize=(9, 6.5), dpi=100)
-        self.canvas = FigureCanvasTkAgg(self.fig, master=plot_tab)
-        NavigationToolbar2Tk(self.canvas, plot_tab).update()
-        self.canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
-        sel = ttk.Frame(plot_tab)
-        sel.pack(fill=tk.X)
-        self.plot_sel = []
-        for i, default in enumerate(["r(t)", "z(r)", "|v_r|(r)", "a(r)"]):
-            v = tk.StringVar(value=default)
-            ttk.Combobox(sel, textvariable=v, values=list(PLOTS), width=10, state="readonly").pack(side=tk.LEFT)
-            v.trace_add("write", lambda *_: self.redraw())
-            self.plot_sel.append(v)
-
-        diag_tab = ttk.Frame(nb)
-        nb.add(diag_tab, text="Summary & diagnostics")
-        self.text = tk.Text(diag_tab, wrap=tk.WORD, font=("Menlo", 11))
-        self.text.pack(fill=tk.BOTH, expand=True)
-
-    # ------------------------------------------------------- config <-> UI --
-    def _load_into_widgets(self) -> None:
-        for _, fields in FIELDS:
-            for _, attr, _t in fields:
-                self.vars[attr].set(repr(getattr(self.cfg, attr)))
-        for attr in ("drag", "method", "linear_solver", "beta_table", "disk_model", "perturbation", "charge"):
-            self.vars[attr].set(getattr(self.cfg, attr))
-        self.vars["coagulation"].set(self.cfg.coagulation)
-        self.vars["sedimentation"].set(self.cfg.sedimentation)
-
-    def _read_widgets(self) -> dp.RunConfig:
-        cfg = self.cfg.copy()
-        for _, fields in FIELDS:
-            for label, attr, typ in fields:
-                txt = self.vars[attr].get().strip()
-                try:
-                    val = typ(float(txt)) if typ is int else typ(txt)
-                except ValueError:
-                    raise ValueError(f"'{label}': cannot parse '{txt}'") from None
-                if typ is float and not math.isfinite(val):
-                    raise ValueError(f"'{label}' must be finite")
-                setattr(cfg, attr, val)
-        cfg.drag = self.vars["drag"].get()
-        cfg.method = self.vars["method"].get()
-        cfg.linear_solver = self.vars["linear_solver"].get()
-        cfg.coagulation = bool(self.vars["coagulation"].get())
-        cfg.sedimentation = bool(self.vars["sedimentation"].get())
-        cfg.charge = self.vars["charge"].get()
-        cfg.perturbation = self.vars["perturbation"].get()
-        model = self.vars["disk_model"].get()
-        if model == "tabulated_beta":
-            cfg.beta_table = self.vars["beta_table"].get()
-        else:
-            cfg.beta_table = ""
-            if model != "tabulated":
-                cfg.disk_model = model
-        # Validate exactly like the CLI/TOML path does.
-        return dp.parse_config(cfg.to_toml())
-
-    # ------------------------------------------------------------ actions --
-    def on_reference(self) -> None:
-        self.cfg = dp.reference_config()
-        self._load_into_widgets()
-        self.status.set("loaded reference case (Kobozeva 2025, 1 m from 100 au)")
-
-    def on_load(self) -> None:
-        path = filedialog.askopenfilename(filetypes=[("TOML", "*.toml"), ("all", "*")])
-        if not path:
-            return
-        try:
-            self.cfg = dp.load_config(path)
-        except Exception as e:  # noqa: BLE001 - show any configuration error
-            messagebox.showerror("Load failed", str(e))
-            return
-        self._load_into_widgets()
-        self.status.set(f"loaded {path}")
-
-    def on_save(self) -> None:
-        try:
-            cfg = self._read_widgets()
-        except Exception as e:  # noqa: BLE001
-            messagebox.showerror("Invalid parameters", str(e))
-            return
-        path = filedialog.asksaveasfilename(defaultextension=".toml", filetypes=[("TOML", "*.toml")])
-        if path:
-            dp.save_config(cfg, path)
-            self.status.set(f"saved {path}")
-
-    def on_beta(self) -> None:
-        path = filedialog.askopenfilename(filetypes=[("CSV", "*.csv"), ("all", "*")])
-        if path:
-            self.vars["beta_table"].set(path)
-
-    def on_run(self) -> None:
-        try:
-            cfg = self._read_widgets()
-        except Exception as e:  # noqa: BLE001
-            messagebox.showerror("Invalid parameters", str(e))
-            return
-        self.cfg = cfg
-        self.control = dp.RunControl()
-        self.btn_run.config(state=tk.DISABLED)
-        self.btn_cancel.config(state=tk.NORMAL)
-        self.status.set("running...")
-        self.progress["value"] = 0
-
-        def work(cfg: dp.RunConfig, ctl: dp.RunControl) -> None:
+def params_to_config(params: Dict[str, Any]) -> dp.RunConfig:
+    """Build and validate a RunConfig from form values (validated like the CLI/TOML path)."""
+    cfg = dp.reference_config()
+    model = str(params.get("disk_model", cfg.disk_model))
+    for _, fields in FIELDS:
+        for attr, label, _u, kind, choices in fields:
+            if attr in ("table_path", "disk_model") or attr not in params:
+                continue
+            raw = params[attr]
             try:
-                self.done_q.put(dp.run(cfg, ctl))
-            except Exception as e:  # noqa: BLE001 - forwarded to the GUI thread
-                self.done_q.put(e)
-
-        self.worker = threading.Thread(target=work, args=(cfg, self.control), daemon=True)
-        self.worker.start()
-        self.after(100, self._poll)
-
-    def on_cancel(self) -> None:
-        if self.control is not None:
-            self.control.cancel()
-            self.status.set("cancelling...")
-
-    def _poll(self) -> None:
-        if self.control is not None:
-            self.progress["value"] = self.control.progress
-        try:
-            res = self.done_q.get_nowait()
-        except queue.Empty:
-            self.after(100, self._poll)
-            return
-        self.btn_run.config(state=tk.NORMAL)
-        self.btn_cancel.config(state=tk.DISABLED)
-        if isinstance(res, Exception):
-            messagebox.showerror("Run failed", str(res))
-            self.status.set("error")
-            return
-        self.result = res
-        s = res["summary"]
-        self.status.set(f"{s['status']} in {s['wall_time_s']:.3f} s"
-                        + ("" if s["success"] else f" - {s['message']}"))
-        if not s["success"] and s["status"] != "cancelled":
-            messagebox.showwarning("Integration did not complete", f"{s['status']}: {s['message']}")
-        self.show_summary()
-        self.redraw()
-
-    def on_export(self) -> None:
-        if not self.result:
-            messagebox.showinfo("Export", "Run a simulation first.")
-            return
-        path = filedialog.asksaveasfilename(defaultextension=".csv", filetypes=[("CSV", "*.csv")])
+                if kind == "float":
+                    val: Any = float(raw)
+                    if not math.isfinite(val):
+                        raise ValueError
+                elif kind == "int":
+                    val = int(float(raw))
+                elif kind == "bool":
+                    val = bool(raw)
+                else:
+                    val = str(raw)
+                    if choices and val not in choices:
+                        raise ValueError
+            except (TypeError, ValueError):
+                raise ValueError(f"«{label}»: недопустимое значение '{raw}'") from None
+            setattr(cfg, attr, val)
+    path = str(params.get("table_path") or "").strip()
+    if model == "tabulated_beta":
         if not path:
-            return
-        cols = self.result["columns"]
-        names = list(cols)
-        data = np.column_stack([cols[n] for n in names])
-        np.savetxt(path, data, delimiter=",", header=",".join(names), comments="", fmt="%.17g")
-        self.status.set(f"exported {len(data)} rows to {path}")
-
-    # ---------------------------------------------------------- display --
-    def show_summary(self) -> None:
-        s = self.result["summary"]
-        st = s["stats"]
-        lines = [
-            f"status              {s['status']}  {s['message']}",
-            f"reached inner edge  {s['reached_inner_edge']}",
-            f"t_drift             {s['t_drift_yr']:.6g} yr",
-            f"t_settle (first)    {s['t_settle_first_yr']:.6g} yr",
-            f"t_settle (last)     {s['t_settle_last_yr']:.6g} yr",
-            f"max |v_r|           {s['vr_max_cms'] / 100:.6g} m/s at r = {s['r_at_vr_max_au']:.4g} au",
-            f"a_final / a_max     {s['a_final_cm']:.6g} / {s['a_max_cm']:.6g} cm",
-            f"Stokes regime seen  {s['stokes_regime_seen']} (max Re {s['max_Re']:.3g})",
-            f"trapped             {s['trapped']}" + (f" at r = {s['r_trap_au']:.6g} au" if s['trapped'] else ""),
-            "",
-            f"final method {s['final_method']}; steps {st['n_steps']}, rejected "
-            f"{st['n_reject_error']} (error) + {st['n_reject_newton']} (Newton), RHS {st['n_rhs']}, "
-            f"Jacobians {st['n_jac']}, LU {st['n_lu']}, Newton it. {st['n_newton_iter']}, "
-            f"lost increments {st['n_lost_increment']}",
-            f"h_min {st['h_min']:.3g}, h_max {st['h_max']:.3g} (code units); wall {s['wall_time_s']:.4f} s",
-        ]
-        for w in st["switches"]:
-            lines.append(f"switch {w['from']} -> {w['to']} at t = {w['t'] * dp.code_units()['t0_yr']:.6g} yr: "
-                         f"{w['reason']}")
-        for w in s["warnings"]:
-            lines.append(f"WARNING: {w}")
-        self.text.delete("1.0", tk.END)
-        self.text.insert(tk.END, "\n".join(lines))
-
-    def redraw(self) -> None:
-        self.fig.clear()
-        if not self.result:
-            self.canvas.draw_idle()
-            return
-        cols = self.result["columns"]
-        for i, var in enumerate(self.plot_sel):
-            ax = self.fig.add_subplot(2, 2, i + 1)
-            xk, yk, xs, ys = PLOTS[var.get()]
-            x, y = cols[xk], cols[yk]
-            if yk == "vr_cms":
-                y = np.abs(y)
-            mask = np.isfinite(x) & np.isfinite(y)
-            if xs == "log":
-                mask &= x > 0
-            if ys == "log":
-                mask &= y > 0
-            ax.plot(x[mask], y[mask], lw=1.2, color="#1f5f8b")
-            ax.set_xscale(xs)
-            ax.set_yscale(ys)
-            ax.set_xlabel(xk)
-            ax.set_ylabel(("|v_r| [cm/s]" if yk == "vr_cms" else yk))
-            ax.grid(True, alpha=0.3)
-        self.fig.tight_layout()
-        self.canvas.draw_idle()
+            raise ValueError("для tabulated_beta укажите файл таблицы β(r)")
+        cfg.beta_table = path
+    elif model == "tabulated":
+        if not path:
+            raise ValueError("для tabulated укажите файл профилей диска")
+        cfg.profile_table = path
+    else:
+        cfg.beta_table = ""
+        cfg.disk_model = model
+    checked = dp.parse_config(cfg.to_toml())
+    # parse_config re-reads table files relative to "."; keep the loaded tables.
+    return checked if model not in ("tabulated_beta", "tabulated") else cfg
 
 
-def main() -> None:
-    App().mainloop()
+def _decimate(cols: Dict[str, np.ndarray]) -> Dict[str, Any]:
+    n = len(next(iter(cols.values()))) if cols else 0
+    if n > MAX_POINTS:
+        idx = np.unique(np.concatenate([np.linspace(0, n - 1, MAX_POINTS).astype(int), [n - 1]]))
+    else:
+        idx = slice(None)
+    return {k: _clean(np.asarray(v)[idx]) for k, v in cols.items()}
+
+
+def disk_overview(cfg: dp.RunConfig, a_cm: float) -> Dict[str, Any]:
+    r_lo = max(cfg.r_in_au, 1e-3)
+    r_hi = max(2.0 * cfg.r_init_au, 10.0 * r_lo, cfg.bump_r_au * 2 if cfg.perturbation != "none" else 0.0)
+    r = np.logspace(math.log10(r_lo), math.log10(r_hi), 500)
+    prof = dp.disk_profile(cfg, r.tolist())
+    out = {k: v for k, v in prof.items()}
+    out["vr_stat_cms"] = dp.stationary_vr(cfg, r.tolist(), a_cm)
+    out["traps"] = [z for z in dp.drift_zeros(cfg, a_cm, r_lo, r_hi) if z["stable"]]
+    out["headwind_zero_au"] = list(dp.zero_headwind_radii(cfg, r_lo, r_hi))
+    return _clean(out)
+
+
+class Job:
+    def __init__(self, kind: str) -> None:
+        self.id = uuid.uuid4().hex[:12]
+        self.kind = kind
+        self.control = dp.RunControl() if kind == "run" else None
+        self.result: Optional[Dict[str, Any]] = None
+        self.payload: Optional[Dict[str, Any]] = None
+        self.error: Optional[str] = None
+        self.done = threading.Event()
+
+
+class State:
+    def __init__(self) -> None:
+        self.jobs: Dict[str, Job] = {}
+        self.lock = threading.Lock()
+
+    def add(self, job: Job) -> None:
+        with self.lock:
+            self.jobs[job.id] = job
+            while len(self.jobs) > 8:  # keep memory bounded
+                oldest = next(iter(self.jobs))
+                if not self.jobs[oldest].done.is_set():
+                    break
+                del self.jobs[oldest]
+
+    def get(self, jid: str) -> Optional[Job]:
+        with self.lock:
+            return self.jobs.get(jid)
+
+
+STATE = State()
+
+
+def start_run(params: Dict[str, Any]) -> Job:
+    cfg = params_to_config(params)
+    job = Job("run")
+
+    def work() -> None:
+        try:
+            res = dp.run(cfg, job.control)
+            job.result = res
+            payload = {"summary": _clean(res["summary"]), "columns": _decimate(res["columns"]),
+                       "n_points": int(len(res["columns"]["t_yr"]))}
+            try:
+                payload["disk"] = disk_overview(cfg, cfg.a_init_cm)
+            except Exception as e:  # noqa: BLE001 - disk panel is optional
+                payload["disk_error"] = str(e)
+            job.payload = payload
+        except Exception as e:  # noqa: BLE001 - reported to the page
+            job.error = str(e)
+        finally:
+            job.done.set()
+
+    threading.Thread(target=work, daemon=True).start()
+    STATE.add(job)
+    return job
+
+
+def start_diffusion(params: Dict[str, Any], opts: Dict[str, Any]) -> Job:
+    cfg = params_to_config(params)
+    r_au = float(opts.get("r_au", 100.0))
+    a_cm = float(opts.get("a_cm", 0.01))
+    alpha_t = float(opts.get("alpha_t", 1e-3))
+    n_paths = int(opts.get("n_paths", 20000))
+    if not (r_au > 0 and a_cm > 0 and alpha_t > 0 and 100 <= n_paths <= 1_000_000):
+        raise ValueError("перемешивание: r, a, α_t > 0; число траекторий 100 … 10⁶")
+    job = Job("diffusion")
+
+    def work() -> None:
+        try:
+            d = dp.vertical_diffusion(cfg, r_au, a_cm, alpha_t, n_paths)
+            H = d["H_au"]
+            z = np.linspace(-5 * H, 5 * H, 401)
+            ex = dp.stationary_dust_density(cfg, r_au, a_cm, alpha_t, z.tolist())
+            zf = np.asarray(d["z_final_au"]) / H
+            hist, edges = np.histogram(zf, bins=60, range=(-5, 5), density=True)
+            dens = np.asarray(ex["density"])
+            dens = dens / np.trapezoid(dens, z / H) if hasattr(np, "trapezoid") else dens / np.sum(
+                0.5 * (dens[1:] + dens[:-1]) * np.diff(z / H))
+            Hd_dub = d["Hd_dubrulle_au"]
+            gauss = np.exp(-0.5 * (z / Hd_dub) ** 2)
+            gauss /= np.sum(0.5 * (gauss[1:] + gauss[:-1]) * np.diff(z / H))
+            job.payload = _clean({
+                "status": d["status"], "message": d["message"], "H_au": H, "St_mid": d["St_mid"],
+                "Hd_sim": d["Hd_simulated_au"] / H, "Hd_err": d["Hd_stat_error_au"] / H,
+                "Hd_exact": d["Hd_exact_au"] / H, "Hd_dubrulle": Hd_dub / H,
+                "t_yr": d["t_yr"], "z_rms_H": np.asarray(d["z_rms_au"]) / H,
+                "z_H": z / H, "density_exact": dens, "density_dubrulle": gauss,
+                "hist_z": 0.5 * (edges[1:] + edges[:-1]), "hist": hist,
+                "wall_time_s": d["wall_time_s"], "n_paths": n_paths, "warnings": d["warnings"],
+                "r_au": r_au, "a_cm": a_cm, "alpha_t": alpha_t,
+            })
+        except Exception as e:  # noqa: BLE001
+            job.error = str(e)
+        finally:
+            job.done.set()
+
+    threading.Thread(target=work, daemon=True).start()
+    STATE.add(job)
+    return job
+
+
+def trajectory_csv(job: Job) -> str:
+    cols = job.result["columns"]
+    names = list(cols)
+    buf = io.StringIO()
+    np.savetxt(buf, np.column_stack([cols[n] for n in names]), delimiter=",", header=",".join(names),
+               comments="", fmt="%.17g")
+    return buf.getvalue()
+
+
+def schema() -> Dict[str, Any]:
+    groups = []
+    for g, fields in FIELDS:
+        groups.append({"title": g, "fields": [
+            {"key": a, "label": lab, "unit": u, "kind": k, "choices": c} for a, lab, u, k, c in fields]})
+    cfg = dp.reference_config()
+    return {"groups": groups, "defaults": config_to_params(cfg),
+            "presets": [{"id": k, "title": v[0]} for k, v in PRESETS.items()],
+            "version": dp.__version__, "backend": dp.active_backend()}
+
+
+class Handler(BaseHTTPRequestHandler):
+    server_version = "dustppd-gui"
+
+    def log_message(self, fmt: str, *args: Any) -> None:  # quiet
+        pass
+
+    # ---------------------------------------------------------------- helpers
+    def _send(self, code: int, body: bytes, ctype: str, extra: Optional[Dict[str, str]] = None) -> None:
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Cache-Control", "no-store")
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _json(self, obj: Any, code: int = 200) -> None:
+        self._send(code, json.dumps(obj, ensure_ascii=False, allow_nan=False).encode(), "application/json")
+
+    def _error(self, msg: str, code: int = 400) -> None:
+        self._json({"error": msg}, code)
+
+    def _body(self) -> Dict[str, Any]:
+        n = int(self.headers.get("Content-Length") or 0)
+        return json.loads(self.rfile.read(n) or b"{}")
+
+    def _job(self, q: Dict[str, List[str]]) -> Optional[Job]:
+        job = STATE.get((q.get("id") or [""])[0])
+        if job is None:
+            self._error("неизвестный расчёт", 404)
+        return job
+
+    # ------------------------------------------------------------------ GET
+    def do_GET(self) -> None:  # noqa: N802
+        url = urlparse(self.path)
+        q = parse_qs(url.query)
+        if url.path in ("/", "/index.html"):
+            return self._static("index.html")
+        if url.path.startswith("/static/"):
+            return self._static(url.path[len("/static/"):])
+        if url.path == "/api/schema":
+            return self._json(schema())
+        if url.path == "/api/status":
+            job = self._job(q)
+            if job is None:
+                return
+            out: Dict[str, Any] = {"id": job.id, "kind": job.kind, "done": job.done.is_set()}
+            if job.control is not None:
+                out["progress"] = job.control.progress
+            if job.done.is_set():
+                if job.error:
+                    out["error"] = job.error
+                else:
+                    out["result"] = job.payload
+            return self._json(out)
+        if url.path == "/api/csv":
+            job = self._job(q)
+            if job is None:
+                return
+            if not job.done.is_set() or job.result is None:
+                return self._error("нет готовой траектории")
+            return self._send(200, trajectory_csv(job).encode(), "text/csv",
+                              {"Content-Disposition": 'attachment; filename="dustppd_trajectory.csv"'})
+        self._error("not found", 404)
+
+    def _static(self, name: str) -> None:
+        path = os.path.normpath(os.path.join(WEB_DIR, name))
+        if not path.startswith(WEB_DIR + os.sep) or not os.path.isfile(path):
+            return self._error("not found", 404)
+        ctype = {".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+                 ".css": "text/css; charset=utf-8", ".svg": "image/svg+xml"}.get(
+            os.path.splitext(path)[1], "application/octet-stream")
+        with open(path, "rb") as f:
+            self._send(200, f.read(), ctype)
+
+    # ----------------------------------------------------------------- POST
+    def do_POST(self) -> None:  # noqa: N802
+        url = urlparse(self.path)
+        try:
+            body = self._body()
+        except (ValueError, json.JSONDecodeError):
+            return self._error("некорректный JSON")
+        try:
+            if url.path == "/api/run":
+                return self._json({"id": start_run(body.get("params", {})).id})
+            if url.path == "/api/diffusion":
+                return self._json({"id": start_diffusion(body.get("params", {}), body.get("options", {})).id})
+            if url.path == "/api/cancel":
+                job = STATE.get(body.get("id", ""))
+                if job is not None and job.control is not None:
+                    job.control.cancel()
+                return self._json({"ok": True})
+            if url.path == "/api/preset":
+                pid = body.get("id", "reference")
+                if pid not in PRESETS:
+                    return self._error("неизвестный пресет")
+                cfg = dp.reference_config(PRESETS[pid][1])
+                return self._json({"params": config_to_params(cfg)})
+            if url.path == "/api/parse_toml":
+                cfg = dp.parse_config(str(body.get("text", "")))
+                return self._json({"params": config_to_params(cfg)})
+            if url.path == "/api/to_toml":
+                return self._json({"text": params_to_config(body.get("params", {})).to_toml()})
+            if url.path == "/api/validate":
+                params_to_config(body.get("params", {}))
+                return self._json({"ok": True})
+        except Exception as e:  # noqa: BLE001 - configuration / input errors go to the page
+            return self._error(str(e))
+        self._error("not found", 404)
+
+
+def make_server(port: int = 0) -> ThreadingHTTPServer:
+    srv = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    srv.daemon_threads = True
+    return srv
+
+
+def main(argv: Optional[List[str]] = None) -> None:
+    ap = argparse.ArgumentParser(prog="dustppd-gui", description="dustppd browser GUI")
+    ap.add_argument("--port", type=int, default=0, help="port (default: any free port)")
+    ap.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
+    args = ap.parse_args(argv)
+    srv = make_server(args.port)
+    url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    print(f"dustppd GUI: {url}  (Ctrl+C — остановить)", flush=True)
+    if not args.no_browser:
+        threading.Timer(0.3, lambda: webbrowser.open(url)).start()
+    try:
+        srv.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        srv.server_close()
 
 
 if __name__ == "__main__":

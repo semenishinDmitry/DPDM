@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>dustppd</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cellipse cx='16' cy='16' rx='14' ry='5' fill='none' stroke='%23d9822b' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='4' fill='%23f2b45a'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <svg class="logo" viewBox="0 0 40 24" aria-hidden="true">
+      <ellipse cx="20" cy="12" rx="18" ry="6" fill="none" stroke="currentColor" stroke-width="1.6" opacity=".55"/>
+      <ellipse cx="20" cy="12" rx="11" ry="3.6" fill="none" stroke="var(--accent)" stroke-width="2"/>
+      <circle cx="20" cy="12" r="3.2" fill="var(--star)"/>
+    </svg>
+    <div>
+      <div class="title">dustppd</div>
+      <div class="subtitle">Динамика пыли в протопланетном диске с остаточным полем</div>
+    </div>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="run" role="tab">Расчёт траектории</button>
+    <button class="tab" data-tab="mix" role="tab">Перемешивание</button>
+    <button class="tab" data-tab="model" role="tab">Модель и методы</button>
+  </nav>
+  <div class="meta" id="meta"></div>
+</header>
+
+<main>
+  <!-- ============================================================ RUN -->
+  <section class="page active" id="page-run">
+    <aside class="side">
+      <div class="side-head">
+        <label class="lbl" for="preset">Сценарий</label>
+        <select id="preset"></select>
+      </div>
+      <form id="form" autocomplete="off"></form>
+      <div class="side-actions">
+        <button class="btn ghost" id="btn-load" type="button" title="Загрузить конфигурацию TOML">Открыть TOML</button>
+        <button class="btn ghost" id="btn-save" type="button" title="Сохранить конфигурацию TOML">Сохранить TOML</button>
+        <input type="file" id="file-toml" accept=".toml,text/plain" hidden>
+      </div>
+    </aside>
+
+    <div class="content">
+      <div class="runbar">
+        <button class="btn primary" id="btn-run" type="button">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>
+          Рассчитать
+        </button>
+        <button class="btn" id="btn-cancel" type="button" disabled>Остановить</button>
+        <div class="progress" id="progress"><div class="bar"></div></div>
+        <div class="status" id="status">Готово к расчёту. Выберите сценарий или задайте параметры слева.</div>
+        <button class="btn ghost" id="btn-csv" type="button" disabled>CSV траектории</button>
+      </div>
+
+      <div id="alert" class="alert" hidden></div>
+
+      <div class="cards" id="cards"></div>
+
+      <div class="section-title">Траектория</div>
+      <div class="grid2" id="charts"></div>
+
+      <div class="section-title">Диск и стационарный дрейф <span class="hint">для текущих параметров и начального размера</span></div>
+      <div class="grid2" id="disk-charts"></div>
+
+      <details class="solver-box" id="solver-box">
+        <summary>Статистика решателя</summary>
+        <div id="solver-stats"></div>
+      </details>
+
+      <div class="empty" id="empty">
+        <svg viewBox="0 0 120 60" aria-hidden="true">
+          <ellipse cx="60" cy="30" rx="56" ry="16" fill="none" stroke="currentColor" opacity=".25"/>
+          <ellipse cx="60" cy="30" rx="36" ry="10" fill="none" stroke="var(--accent)" stroke-width="2" opacity=".7"/>
+          <circle cx="60" cy="30" r="6" fill="var(--star)"/>
+          <circle cx="102" cy="26" r="2" fill="currentColor"/>
+        </svg>
+        <p>Нажмите <b>«Рассчитать»</b> — здесь появятся графики траектории, профили диска и сводка.</p>
+        <p class="hint">Расчёт опорного случая статьи занимает доли секунды.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ MIX -->
+  <section class="page" id="page-mix">
+    <aside class="side">
+      <p class="lead">Стохастическое вертикальное перемешивание: тысячи траекторий уравнения Ито
+        с оседанием и турбулентной диффузией. Параметры диска и частицы (кроме размера) берутся из вкладки «Расчёт траектории».</p>
+      <form id="mix-form" class="fields" autocomplete="off">
+        <label class="field"><span>радиус орбиты r <i>а.е.</i></span><input name="r_au" value="100"></label>
+        <label class="field"><span>размер пылинки a <i>см</i></span><input name="a_cm" value="0.01"></label>
+        <label class="field"><span>турбулентность α<sub>t</sub></span><input name="alpha_t" value="1e-3"></label>
+        <label class="field"><span>число траекторий</span><input name="n_paths" value="20000"></label>
+      </form>
+      <button class="btn primary wide" id="btn-mix" type="button">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z" fill="currentColor"/></svg>
+        Смоделировать
+      </button>
+      <div class="status small" id="mix-status"></div>
+      <div class="eq-mini">
+        <div class="eq">dz = [ v<sub>s</sub> + ∂D/∂z + D ∂ln ρ<sub>g</sub>/∂z ] dt + √(2D) dW</div>
+        <div class="eq">v<sub>s</sub> = −Ω St(z) z, &nbsp; D = α<sub>t</sub> Ω H<sup>2</sup> / (1 + St<sup>2</sup>)</div>
+        <div class="eq">Дюбрюль: H<sub>d</sub> = H √(α / (α + St))</div>
+      </div>
+    </aside>
+    <div class="content">
+      <div id="mix-alert" class="alert" hidden></div>
+      <div class="cards" id="mix-cards"></div>
+      <div class="grid2" id="mix-charts"></div>
+      <div class="empty" id="mix-empty">
+        <p>Сравнение толщины пылевого слоя H<sub>d</sub>: стохастическая модель, точное стационарное решение и формула Дюбрюля.</p>
+        <p class="hint">20 000 траекторий считаются за доли секунды.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ MODEL -->
+  <section class="page" id="page-model">
+    <article class="doc">
+      <h1>Модель</h1>
+      <p>Одна сферическая пылинка радиуса <i>a</i> и плотности ρ<sub>d</sub> движется в газовом диске вокруг звезды
+        типа T Тельца. Силы: гравитация звезды (тонкий диск), трение о газ, центробежная и кориолисова,
+        при включённом заряде — сила Лоренца. Основа — В. А. Кобозева (СПбГУ, 2025), уравнения (11).</p>
+
+      <div class="eqblock">
+        <div class="eqrow"><span class="eq">dr/dt = v<sub>r</sub></span></div>
+        <div class="eqrow"><span class="eq">dv<sub>r</sub>/dt = j<sup>2</sup>/r<sup>3</sup> − M/r<sup>2</sup> − (v<sub>r</sub> − u<sub>r</sub>)/τ<sub>s</sub></span><span class="why">центробежная, гравитация, трение</span></div>
+        <div class="eqrow"><span class="eq">dj/dt = −(r/τ<sub>s</sub>)(j/r − u<sub>φ</sub>)</span><span class="why">j = r v<sub>φ</sub>: газ тормозит пылинку по азимуту</span></div>
+        <div class="eqrow"><span class="eq">dz/dt = v<sub>z</sub>, &nbsp; dv<sub>z</sub>/dt = −M z/r<sup>3</sup> − v<sub>z</sub>/τ<sub>s</sub></span><span class="why">вертикальная гравитация и трение</span></div>
+        <div class="eqrow"><span class="eq">da/dt = Y<sub>d</sub> ρ |v − u| / (4 ρ<sub>d</sub>)</span><span class="why">рост при сборе мелкой пыли</span></div>
+      </div>
+      <p class="note">Безразмерные единицы: r<sub>0</sub> = 1 а.е., v<sub>0</sub> = (GM<sub>☉</sub>/а.е.)<sup>1/2</sup> ≈ 29.8 км/с,
+        t<sub>0</sub> = r<sub>0</sub>/v<sub>0</sub> ≈ 0.159 года.</p>
+
+      <h2>Трение о газ</h2>
+      <div class="two">
+        <div class="eqblock">
+          <div class="eqrow"><span class="eq">τ<sub>Ep</sub> = ρ<sub>d</sub> a / (ρ v<sub>th</sub>)</span><span class="why">Эпштейн, a &lt; 3λ/2</span></div>
+          <div class="eqrow"><span class="eq">τ<sub>St</sub> = (2/9) ρ<sub>d</sub> a<sup>2</sup> / η</span><span class="why">Стокс, a ≥ 3λ/2</span></div>
+          <div class="eqrow"><span class="eq">St = τ<sub>s</sub> Ω<sub>K</sub></span><span class="why">число Стокса</span></div>
+        </div>
+        <p>v<sub>th</sub> = (8kT/πμm<sub>H</sub>)<sup>1/2</sup>, η = v<sub>th</sub>λρ/3, λ = μm<sub>H</sub>/(ρσ).
+          При a = 3λ/2 выражения совпадают, τ<sub>s</sub> непрерывна. Быстрее всего дрейфуют тела с St ≈ 1.</p>
+      </div>
+
+      <h2>Дрейф и диск</h2>
+      <div class="two">
+        <div class="eqblock">
+          <div class="eqrow"><span class="eq">u<sub>φ</sub> = v<sub>K</sub> (1 − β<sub>K</sub>)<sup>1/2</sup></span></div>
+          <div class="eqrow"><span class="eq">v<sub>r</sub> = (u<sub>r</sub>/St − β<sub>K</sub> v<sub>K</sub>) / (St + 1/St)</span><span class="why">стационарный дрейф</span></div>
+          <div class="eqrow"><span class="eq">β<sub>K</sub> = [ −(r/ρ) ∂p/∂r + r B<sub>z</sub>B<sub>r</sub>/(4πΣ) ] / v<sub>K</sub><sup>2</sup></span><span class="why">самосогласованный, ур. (16)</span></div>
+        </div>
+        <p>Газ вращается чуть медленнее кеплеровского, пыль чувствует встречный ветер и дрейфует внутрь.
+          В максимуме давления β<sub>K</sub> = 0 — там <b>ловушка</b>. Аналитический диск Дудорова–Хайбрахманова:
+          T ∝ r<sup>−9/8</sup>, ρ<sub>0</sub> ∝ r<sup>−21/16</sup>, H ∝ r<sup>15/16</sup>, ρ(r,z) = ρ<sub>0</sub> e<sup>−z²/2H²</sup>.
+          Край мёртвой зоны: ρ → ρ · [1 + A(1 + tanh((r − r<sub>b</sub>)/w))/2].</p>
+      </div>
+
+      <h2>Заряд и поле</h2>
+      <div class="two">
+        <div class="eqblock">
+          <div class="eqrow"><span class="eq">e<sup>ψ</sup> (m<sub>i</sub>/m<sub>e</sub>)<sup>1/2</sup> = 1 − ψ, &nbsp; Z = ψ a kT / e<sup>2</sup></span><span class="why">OML</span></div>
+          <div class="eqrow"><span class="eq">F = (Ze/c)(v − u) × B</span><span class="why">сила Лоренца</span></div>
+          <div class="eqrow"><span class="eq">Γ = (ZeB/mc) τ<sub>s</sub></span><span class="why">параметр Холла</span></div>
+        </div>
+        <p>Остаточное поле B<sub>z</sub> = B<sub>0</sub>(r/а.е.)<sup>−p</sup>, B<sub>r</sub> = q B<sub>z</sub>.
+          OML-заряд — оценка сверху (не учитывает эффект Хавнеса).</p>
+      </div>
+
+      <h1>Численные методы</h1>
+      <div class="methods">
+        <div class="m"><h3>DOPRI5</h3><p>Явный Рунге–Кутта 5(4), PI-регулятор шага, плотный вывод для событий,
+          суммирование Кэхэна. Быстр для крупных тел без жёсткости.</p></div>
+        <div class="m"><h3>BDF 1–5</h3><p>Неявный многошаговый метод переменного порядка (форма Шампайна–Райхельт).
+          Ньютон с LU или Ньютон–Крылов (GMRES). Для мелкой пыли, где τ<sub>s</sub> ≪ периода.</p></div>
+        <div class="m"><h3>auto</h3><p>Старт явным методом и переход на BDF при распознанной жёсткости:
+          h|λ| у границы устойчивости и оценка спектрального радиуса.</p></div>
+        <div class="m"><h3>Якобиан</h3><p>Аналитический, включая производные диска и силу Лоренца; проверен разностями.
+          Главное ускорение: все расчёты статьи — 0.1 с.</p></div>
+        <div class="m"><h3>События</h3><p>Корень по плотному выводу методом Брента: достижение r<sub>in</sub>,
+          вход в полосу осаждения, остановка в ловушке.</p></div>
+        <div class="m"><h3>СДУ</h3><p>Эйлер–Маруяма, Мильштейн и линейно-неявный Эйлер (снос жёсткий высоко над экватором);
+          xoshiro256++ с отдельным потоком на траекторию.</p></div>
+      </div>
+      <p class="note">Подробно: <code>docs/physics_model.md</code>, <code>docs/numerical_methods.md</code>,
+        <code>docs/science_extensions.md</code> и PDF-обзор <code>docs/dustppd_overview_ru.pdf</code>.</p>
+    </article>
+  </section>
+</main>
+
+<div class="tooltip" id="tooltip" hidden></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
