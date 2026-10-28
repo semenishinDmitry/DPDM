@@ -1,0 +1,122 @@
+name: Release
+
+# Desktop applications for macOS (.dmg), Windows (setup .exe) and Linux (AppImage),
+# each with Python, numpy and the C++ core bundled. Pushing a tag v* builds, checks
+# and publishes them as a GitHub release; a manual run only uploads the artifacts.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYINSTALLER: "pyinstaller==6.22.3"
+  PILLOW: "pillow==13.0.0"
+
+jobs:
+  build:
+    name: app-${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64,   os: macos-14 }
+          - { name: windows-x64,   os: windows-2022 }
+          - { name: linux-x86_64,  os: ubuntu-22.04 }  # older glibc: runs on more distributions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Version
+        id: v
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then v="${GITHUB_REF_NAME#v}"; else v="0.0.0-dev.${GITHUB_SHA::7}"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Install package and PyInstaller
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . "$PYINSTALLER" "$PILLOW"
+      - name: Build application
+        run: pyinstaller --noconfirm packaging/dustppd.spec
+
+      # ------------------------------------------------------------- macOS
+      - name: Check and package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          python packaging/smoke_test.py dist/dustppd.app/Contents/MacOS/dustppd
+          mkdir dmgroot
+          cp -R dist/dustppd.app dmgroot/
+          ln -s /Applications dmgroot/Applications
+          hdiutil create -volname dustppd -srcfolder dmgroot -ov -format UDZO \
+            "dustppd-${{ steps.v.outputs.version }}-macos-arm64.dmg"
+
+      # ----------------------------------------------------------- Windows
+      - name: Check and package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          python packaging/smoke_test.py dist/dustppd/dustppd.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          python -c "from PIL import Image; Image.open('packaging/icon.png').save('packaging/windows/icon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])"
+          choco install innosetup --no-progress -y
+          $v = "${{ steps.v.outputs.version }}"
+          $num = ($v -split "-")[0]
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /Qp "/DAppVersion=$v" "/DVersionNumeric=$num" `
+            "/DSourceDir=$env:GITHUB_WORKSPACE\dist\dustppd" packaging\windows\dustppd.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Move-Item dist\dustppd-*-setup.exe .
+
+      # ------------------------------------------------------------- Linux
+      - name: Check and package (Linux)
+        if: runner.os == 'Linux'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"  # no FUSE on the runner
+        run: |
+          python packaging/smoke_test.py dist/dustppd/dustppd
+          v=${{ steps.v.outputs.version }}
+          mkdir -p AppDir/usr/lib
+          cp -R dist/dustppd AppDir/usr/lib/dustppd
+          cp packaging/linux/AppRun AppDir/AppRun
+          cp packaging/linux/dustppd.desktop AppDir/dustppd.desktop
+          cp packaging/icon.png AppDir/dustppd.png
+          curl -fsSL -o appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool AppDir "dustppd-$v-linux-x86_64.AppImage"
+          ./"dustppd-$v-linux-x86_64.AppImage" --help > /dev/null
+          tar -C dist -czf "dustppd-$v-linux-x86_64.tar.gz" dustppd
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dustppd-${{ matrix.name }}
+          path: |
+            dustppd-*.dmg
+            dustppd-*-setup.exe
+            dustppd-*.AppImage
+            dustppd-*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la assets
+          gh release create "$GITHUB_REF_NAME" assets/* --title "dustppd $GITHUB_REF_NAME" \
+            --notes-file packaging/RELEASE_NOTES.md

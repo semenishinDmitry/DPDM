@@ -8,3 +8,10 @@ __pycache__/
 !tests/**/*.csv
 !configs/**/*.csv
 ref.json
+
+# desktop app packaging (PyInstaller, AppImage, installers)
+/dist/
+/AppDir/
+packaging/windows/icon.ico
+*.dmg
+*.AppImage

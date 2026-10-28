@@ -667,6 +667,19 @@ async function init() {
     return;
   }
   $("#meta").textContent = `v${app.schema.version} · SIMD ${app.schema.backend}`;
+  const ping = () => fetch("/api/ping", { method: "POST", body: "{}" }).catch(() => {});
+  ping();
+  setInterval(ping, 10000);
+  addEventListener("pagehide", () => navigator.sendBeacon("/api/bye", "{}"));
+  if (app.schema.app_mode) {
+    const q = $("#btn-quit");
+    q.hidden = false;
+    q.addEventListener("click", async () => {
+      try { await api("/api/quit", {}); } catch { /* server already gone */ }
+      document.body.replaceChildren(el("div", { class: "bye" },
+        el("h2", {}, "dustppd закрыт"), el("p", {}, "Эту вкладку можно закрыть. Чтобы начать снова, запустите приложение.")));
+    });
+  }
   const ps = $("#preset");
   ps.append(el("option", { value: "" }, "— свои параметры —"));
   for (const p of app.schema.presets) ps.append(el("option", { value: p.id }, p.title));

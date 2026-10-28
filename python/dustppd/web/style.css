@@ -173,6 +173,8 @@ details.group[open] > summary::before { transform: rotate(45deg); }
 .solver-box td:first-child { color: var(--muted); }
 .solver-box ul { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
 
+.bye { max-width: 520px; margin: 18vh auto; text-align: center; color: var(--muted); }
+.bye h2 { color: var(--ink); }
 .empty { text-align: center; color: var(--muted); padding: 50px 20px; }
 .empty svg { width: 160px; color: var(--muted); }
 .empty p { margin: 6px 0; }

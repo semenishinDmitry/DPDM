@@ -6,7 +6,11 @@ A small HTTP server (standard library only) listens on 127.0.0.1 and the default
 browser opens the page. Simulations run in worker threads; the C++ core releases
 the GIL, so the page stays responsive and runs can be cancelled.
 
-Options: ``--port N`` (default: a free port), ``--no-browser``.
+Options: ``--port N`` (default: a free port), ``--no-browser``, ``--app``.
+
+``--app`` is used by the packaged desktop application: the server stops when the
+last page is closed (or on the page's "Quit" button), and a second launch opens
+the running instance instead of starting another server.
 """
 from __future__ import annotations
 
@@ -15,7 +19,9 @@ import io
 import json
 import math
 import os
+import tempfile
 import threading
+import time
 import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -223,6 +229,52 @@ class State:
 STATE = State()
 
 
+class Lifetime:
+    """App mode: stop the server when no page is left (pages ping and say goodbye)."""
+
+    IDLE_START_S = 300.0   # no page ever connected
+    PING_TIMEOUT_S = 180.0  # pages ping every 10 s; background tabs may be throttled to 1/min
+    BYE_GRACE_S = 12.0      # a reload says goodbye and pings again at once
+
+    def __init__(self) -> None:
+        self.app_mode = False
+        self.server: Optional[ThreadingHTTPServer] = None
+        self.last_ping = time.monotonic()
+        self.seen_page = False
+        self.bye_at: Optional[float] = None
+        self.lock = threading.Lock()
+
+    def ping(self) -> None:
+        with self.lock:
+            self.last_ping = time.monotonic()
+            self.seen_page = True
+            self.bye_at = None
+
+    def bye(self) -> None:
+        with self.lock:
+            self.bye_at = time.monotonic()
+
+    def stop(self) -> None:
+        if self.server is not None:
+            threading.Thread(target=self.server.shutdown, daemon=True).start()
+
+    def watch(self) -> None:
+        while True:
+            time.sleep(1.0)
+            now = time.monotonic()
+            with self.lock:
+                idle = now - self.last_ping
+                gone = (self.bye_at is not None and now - self.bye_at > self.BYE_GRACE_S
+                        and self.last_ping < self.bye_at)
+                limit = self.PING_TIMEOUT_S if self.seen_page else self.IDLE_START_S
+            if gone or idle > limit:
+                self.stop()
+                return
+
+
+LIFE = Lifetime()
+
+
 def start_run(params: Dict[str, Any]) -> Job:
     cfg = params_to_config(params)
     job = Job("run")
@@ -309,7 +361,7 @@ def schema() -> Dict[str, Any]:
     cfg = dp.reference_config()
     return {"groups": groups, "defaults": config_to_params(cfg),
             "presets": [{"id": k, "title": v[0]} for k, v in PRESETS.items()],
-            "version": dp.__version__, "backend": dp.active_backend()}
+            "version": dp.__version__, "backend": dp.active_backend(), "app_mode": LIFE.app_mode}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -419,6 +471,18 @@ class Handler(BaseHTTPRequestHandler):
             if url.path == "/api/validate":
                 params_to_config(body.get("params", {}))
                 return self._json({"ok": True})
+            if url.path == "/api/ping":
+                LIFE.ping()
+                return self._json({"ok": True})
+            if url.path == "/api/bye":
+                LIFE.bye()
+                return self._json({"ok": True})
+            if url.path == "/api/quit":
+                if not LIFE.app_mode:
+                    return self._error("выход доступен только в режиме приложения")
+                self._json({"ok": True})
+                LIFE.stop()
+                return
         except Exception as e:  # noqa: BLE001 - configuration / input errors go to the page
             return self._error(str(e))
         self._error("not found", 404)
@@ -430,13 +494,47 @@ def make_server(port: int = 0) -> ThreadingHTTPServer:
     return srv
 
 
+INSTANCE_FILE = os.path.join(tempfile.gettempdir(), "dustppd-gui-instance.json")
+
+
+def _running_instance() -> Optional[str]:
+    """URL of an already running app-mode server, if any."""
+    try:
+        with open(INSTANCE_FILE, encoding="utf-8") as f:
+            url = json.load(f)["url"]
+        from urllib.request import urlopen
+        with urlopen(url + "api/schema", timeout=1.5) as r:
+            if r.status == 200:
+                return url
+    except Exception:  # noqa: BLE001 - stale or missing file
+        pass
+    return None
+
+
 def main(argv: Optional[List[str]] = None) -> None:
     ap = argparse.ArgumentParser(prog="dustppd-gui", description="dustppd browser GUI")
     ap.add_argument("--port", type=int, default=0, help="port (default: any free port)")
     ap.add_argument("--no-browser", action="store_true", help="do not open a browser tab")
+    ap.add_argument("--app", action="store_true",
+                    help="desktop-app mode: quit when the page is closed, reuse a running instance")
     args = ap.parse_args(argv)
+    if args.app and args.port == 0:
+        url = _running_instance()
+        if url:
+            if not args.no_browser:
+                webbrowser.open(url)
+            return
     srv = make_server(args.port)
     url = f"http://127.0.0.1:{srv.server_address[1]}/"
+    LIFE.app_mode = args.app
+    LIFE.server = srv
+    if args.app:
+        try:
+            with open(INSTANCE_FILE, "w", encoding="utf-8") as f:
+                json.dump({"url": url, "pid": os.getpid()}, f)
+        except OSError:
+            pass
+        threading.Thread(target=LIFE.watch, daemon=True).start()
     print(f"dustppd GUI: {url}  (Ctrl+C — остановить)", flush=True)
     if not args.no_browser:
         threading.Timer(0.3, lambda: webbrowser.open(url)).start()
@@ -446,6 +544,14 @@ def main(argv: Optional[List[str]] = None) -> None:
         pass
     finally:
         srv.server_close()
+        if args.app:
+            try:
+                with open(INSTANCE_FILE, encoding="utf-8") as f:
+                    mine = json.load(f).get("pid") == os.getpid()
+                if mine:
+                    os.remove(INSTANCE_FILE)
+            except (OSError, ValueError):
+                pass
 
 
 if __name__ == "__main__":

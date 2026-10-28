@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=dustppd
+Comment=Dust dynamics in protoplanetary disks with a fossil magnetic field
+Exec=dustppd
+Icon=dustppd
+Terminal=false
+Categories=Science;Education;

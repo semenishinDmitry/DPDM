@@ -127,3 +127,10 @@ def test_vertical_mixing(server):
     # Same case as docs/science/settling.md: exact 0.6215, Dubrulle 0.7241.
     assert abs(d["Hd_exact"] - 0.6215) < 2e-3 and abs(d["Hd_dubrulle"] - 0.7241) < 2e-3
     assert abs(d["Hd_sim"] - d["Hd_exact"]) < 5 * d["Hd_err"] + 0.01
+
+
+def test_quit_only_in_app_mode(server):
+    code, r = _post(server, "/api/quit", {})
+    assert code == 400  # a plain dustppd-gui server is stopped with Ctrl+C, not from the page
+    assert _post(server, "/api/ping", {})[0] == 200
+    assert json.loads(_get(server, "/api/schema")[2])["app_mode"] is False

@@ -79,6 +79,16 @@ Failures are reported in `status`/`message` (`run(..., check=True)` raises
 `SolverError`); exceptions raised inside a Python RHS propagate. Arrays returned to
 Python own their memory (trajectories are moved without copying).
 
+## Desktop application (no Python needed)
+
+Ready-made apps for macOS (Apple Silicon), Windows and Linux are attached to each
+[GitHub release](https://github.com/semenishinDmitry/DPDM/releases): download, install
+like any other program, start it — a dustppd tab opens in the browser; closing the tab
+quits the program. See `packaging/RELEASE_NOTES.md` for the first-start warnings of
+unsigned apps. Releases are built by `.github/workflows/release.yml` when a tag `v*` is
+pushed (PyInstaller; each app is started and runs the paper's reference case in CI
+before it is published).
+
 ## GUI
 
 ```bash
