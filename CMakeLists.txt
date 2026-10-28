@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(dustppd VERSION 0.1.0 LANGUAGES CXX
+project(dustppd VERSION 0.1.1 LANGUAGES CXX
         DESCRIPTION "ODE solver library and protoplanetary dust-dynamics model")
 
 set(CMAKE_CXX_STANDARD 20)

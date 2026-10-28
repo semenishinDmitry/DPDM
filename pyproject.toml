@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "dustppd"
-version = "0.1.0"
+version = "0.1.1"
 description = "ODE solvers (DOPRI5, BDF, Newton-Krylov) and the Kobozeva (2025) protoplanetary dust-dynamics model"
 readme = "README.md"
 requires-python = ">=3.9"

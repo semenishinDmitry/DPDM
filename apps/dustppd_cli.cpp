@@ -77,7 +77,7 @@ int main(int argc, char** argv) {
     const std::string cmd = argv[1];
     try {
         if (cmd == "info") {
-            std::cout << "dustppd 0.1.0\nSIMD kernel backends available:";
+            std::cout << "dustppd 0.1.1\nSIMD kernel backends available:";
             for (auto b : ode::kernels::available_backends()) std::cout << ' ' << ode::kernels::to_string(b);
             std::cout << "\nactive backend: " << ode::kernels::to_string(ode::kernels::active_backend()) << "\n";
             const auto u = dust::make_units(1);

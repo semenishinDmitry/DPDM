@@ -45,7 +45,7 @@ from ._core import (  # noqa: F401
     write_csv,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
