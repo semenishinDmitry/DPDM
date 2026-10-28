@@ -74,12 +74,15 @@ void check_known(const toml::table& t) {
         {"output", {"save_steps"}},
     };
     for (auto&& [sec, node] : t) {
-        auto it = std::find_if(known.begin(), known.end(), [&](auto& p) { return p.first == sec.str(); });
-        if (it == known.end()) throw std::invalid_argument("unknown config section [" + std::string(sec.str()) + "]");
+        // Copy the name: capturing a structured binding in a lambda needs clang >= 16
+        // (Apple clang 15, Xcode 15, rejects it).
+        const std::string sec_name(sec.str());
+        auto it = std::find_if(known.begin(), known.end(), [&](auto& p) { return p.first == sec_name; });
+        if (it == known.end()) throw std::invalid_argument("unknown config section [" + sec_name + "]");
         if (const auto* tab = node.as_table())
             for (auto&& [k, _] : *tab)
                 if (std::find(it->second.begin(), it->second.end(), std::string(k.str())) == it->second.end())
-                    throw std::invalid_argument("unknown config key " + std::string(sec.str()) + "." +
+                    throw std::invalid_argument("unknown config key " + sec_name + "." +
                                                 std::string(k.str()));
     }
 }
