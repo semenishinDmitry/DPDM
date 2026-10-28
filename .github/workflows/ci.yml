@@ -30,7 +30,12 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=${{ matrix.cc }} -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} ${{ matrix.cfg }}
       - name: Build
-        run: cmake --build build --parallel
+        shell: bash
+        # Compiler errors are re-emitted as annotations (readable without log access).
+        run: |
+          set -o pipefail
+          cmake --build build --parallel 2>&1 | tee build.log || {
+            grep -E "error[: ]" build.log | head -20 | sed 's/^/::error::/'; exit 1; }
       - name: Kernel backends
         run: ./build/dustppd info
       - name: Test
@@ -53,7 +58,11 @@ jobs:
         with:
           python-version: "3.12"
       - name: Build and install wheel
-        run: python -m pip install ".[test]"
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pip install -v ".[test]" 2>&1 | tee pip.log || {
+            grep -E "error[: ]|Error" pip.log | head -20 | sed 's/^/::error::/'; exit 1; }
       - name: Test installed package (outside the source tree)
         shell: bash
         run: |
