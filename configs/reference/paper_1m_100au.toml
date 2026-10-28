@@ -1,0 +1,41 @@
+# Reference case of Kobozeva (2025), Sec. 3.3-3.4, Fig. 6 (green) and Fig. 7/8/9:
+# a 1 m grain released at r = 100 au, z = 3H, analytic disk (beta_K = 0.0026).
+# Paper values (Tables 1, 2; Sec. 3.4): t_sed = 252 yr, t_drift = 306 kyr,
+# max |v_r| = 58.5 m/s at r ~= 0.31 au, |v_r(r_in = 0.05 au)| = 33.5 m/s.
+# See docs/physics_model.md for parameter provenance and docs/reference_case.md
+# for the comparison.
+
+[run]
+name = "paper_1m_100au"
+description = "Kobozeva (2025) reference: 1 m body from 100 au, analytic disk, sedimentation + radial drift"
+t_end_yr = 1.0e8            # safety limit; the run ends at the inner edge
+
+[particle]
+a_init_cm = 100.0           # Sec. 2.6, Table 5 ("a")
+rho_d = 3.0                 # g/cm^3 (Sec. 2.6)
+r_init_au = 100.0           # Table 5 ("r0")
+z_init_H = 3.0              # z0 = 3 H(r_init) (Sec. 2.6)
+vr_init_cms = 0.0
+vz_init_cms = 0.0
+
+[physics]
+drag = "both"               # Epstein / Stokes switch at a/lambda = 3/2 (Sec. 1.4)
+coagulation = false
+sedimentation = true
+dust_to_gas = 0.01          # Y_d (Sec. 2.6)
+mu = 2.3                    # reproduces Eq. (3); not stated explicitly
+sigma_mol_cm2 = 1.0e-16     # NOT stated in the paper: calibrated (docs/physics_model.md, A3)
+r_in_au = 0.05              # Sec. 2.6 / Sec. 3.4
+settle_eps = 0.005          # NOT stated in the paper: calibrated (docs/physics_model.md, A4)
+
+[disk]
+model = "analytic"
+alpha = 0.01
+mdot = 1.0                  # units of 1e-8 Msun/yr
+mstar = 1.0
+vphi2vk = 0.9987            # beta_K = 1 - 0.9987^2 = 0.0026 (Sec. 2.6, Table 5)
+
+[solver]
+method = "auto"
+rtol = 1.0e-8
+atol = [1e-12, 1e-16, 1e-12, 1e-12, 1e-16, 1e-12]   # code units: r, v_r, j, z, v_z, a/a0

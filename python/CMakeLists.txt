@@ -1,0 +1,7 @@
+find_package(Python 3.9 REQUIRED COMPONENTS Interpreter Development.Module)
+find_package(pybind11 2.11 CONFIG REQUIRED)
+pybind11_add_module(_core bindings.cpp)
+target_link_libraries(_core PRIVATE dpd_dust dpd_options)
+target_compile_definitions(_core PRIVATE VERSION_INFO=${PROJECT_VERSION})
+install(TARGETS _core LIBRARY DESTINATION dustppd)
+install(FILES ${PROJECT_SOURCE_DIR}/configs/reference/paper_1m_100au.toml DESTINATION dustppd/configs)

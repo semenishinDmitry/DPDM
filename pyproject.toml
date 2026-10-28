@@ -1,0 +1,36 @@
+[build-system]
+requires = ["scikit-build-core>=0.8", "pybind11>=2.11"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "dustppd"
+version = "0.1.0"
+description = "ODE solvers (DOPRI5, BDF, Newton-Krylov) and the Kobozeva (2025) protoplanetary dust-dynamics model"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = ["numpy>=1.21"]
+
+[project.optional-dependencies]
+gui = ["matplotlib>=3.5"]
+test = ["pytest>=7", "scipy>=1.9", "matplotlib>=3.5"]
+
+[project.scripts]
+dustppd-gui = "dustppd.gui:main"
+
+[tool.scikit-build]
+minimum-version = "0.8"
+cmake.version = ">=3.21"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["python/dustppd"]
+cmake.build-type = "Release"
+
+[tool.scikit-build.cmake.define]
+DPD_BUILD_PYTHON = "ON"
+DPD_BUILD_TESTS = "OFF"
+DPD_BUILD_BENCH = "OFF"
+DPD_BUILD_APPS = "OFF"
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+filterwarnings = ["ignore::DeprecationWarning:matplotlib.*", "ignore::DeprecationWarning:pyparsing.*"]

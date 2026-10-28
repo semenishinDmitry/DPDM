@@ -1,0 +1,23 @@
+name: Benchmarks
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"
+
+jobs:
+  bench:
+    strategy:
+      matrix:
+        os: [ubuntu-24.04, macos-14]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: seanmiddleditch/gha-setup-ninja@v5
+      - run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DDPD_BUILD_TESTS=OFF
+      - run: cmake --build build --parallel
+      - run: ./build/bench/dpd_bench --quick | tee bench.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bench-${{ matrix.os }}
+          path: bench.md
