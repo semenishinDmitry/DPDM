@@ -9,6 +9,10 @@ inline constexpr double GM_sun = 1.3271244e26;      // cm^3 s^-2 (IAU 2015 nomin
 inline constexpr double k_B = 1.380649e-16;         // erg K^-1 (SI 2019, exact)
 inline constexpr double m_p = 1.67262192369e-24;    // g (CODATA 2018); paper: "m_H - proton mass"
 inline constexpr double year = 3.15576e7;           // s (Julian year)
+inline constexpr double e_esu = 4.80320471e-10;     // statC (CODATA 2018)
+inline constexpr double c_light = 2.99792458e10;    // cm/s (exact)
+inline constexpr double m_e = 9.1093837015e-28;     // g (CODATA 2018)
+inline constexpr double amu = 1.66053906660e-24;    // g (CODATA 2018)
 inline constexpr double pi = 3.141592653589793238462643383279502884;
 
 }  // namespace dpd::dust::cgs

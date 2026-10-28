@@ -1,0 +1,23 @@
+# Illustrative dust trap at the inner edge of a dead zone (NOT Belmondo output):
+# self-consistent beta_K from Eq. (16) of the paper on top of the analytic disk,
+# midplane density rising by a factor 1 + A across r_b (Kretke & Lin 2007;
+# Dzyurkevich et al. 2010). A 1 cm grain released at 15 au is trapped near 10.7 au.
+
+[run]
+name = "dead_zone_trap"
+description = "1 cm grain trapped at the inner edge of a dead zone (illustrative disk)"
+t_end_yr = 3.0e6
+
+[particle]
+a_init_cm = 1.0
+r_init_au = 15.0
+
+[physics]
+sedimentation = false
+
+[disk]
+model = "self_consistent"
+perturbation = "dead_zone_edge"
+bump_amplitude = 2.0
+bump_r_au = 10.0
+bump_width_au = 1.0

@@ -217,6 +217,7 @@ TEST_CASE("tabulated beta: constant table reproduces the analytic disk; extrapol
     c.r_init_au = 10;
     const auto ra = run(c, {}, false);
     const double b = 1 - 0.9987 * 0.9987;
+    c.disk.model = DiskModel::TabulatedBeta;
     c.disk.beta_r_au = {1.0, 10.0, 100.0};
     c.disk.beta_values = {b, b, b};
     const auto rt = run(c, {}, false);
@@ -327,6 +328,7 @@ TEST_CASE("analytic Jacobian matches central finite differences", "[dust][jacobi
         g.coagulation = p.coag;
         g.drag = p.drag;
         DiskParams dp;
+        dp.model = DiskModel::TabulatedBeta;
         dp.beta_r_au = {0.1, 1.0, 10.0, 100.0};
         dp.beta_values = {0.002, 0.004, 0.01, 0.03};  // non-zero d beta / dr
         DustModel m(dp, g);

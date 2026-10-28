@@ -6,6 +6,10 @@
 
 namespace dpd::dust {
 
+namespace {
+constexpr double kInf_ = std::numeric_limits<double>::infinity();
+}  // namespace
+
 ode::Options make_options(const RunConfig& cfg) {
     ode::Options o;
     o.method = cfg.solver.method;
@@ -88,6 +92,21 @@ RunResult run(const RunConfig& cfg, const RunControl& ctl, bool keep_trajectory)
     if (settle && last_in > last_out && !res.y_last.empty() && std::abs(res.y_last[DustModel::Z]) <= band)
         S.t_settle_last_yr = res.events[static_cast<std::size_t>(last_in)].t * u.t0_yr();
 
+    // Trapping detection
+    if (res.status == ode::Status::Success && !S.reached_inner_edge && res.t.size() > 2) {
+        const double t_end_code = res.t.back();
+        double rmin = kInf_, rmax = -kInf_;
+        for (std::size_t i = 0; i < res.t.size(); ++i)
+            if (res.t[i] >= 0.9 * t_end_code) {
+                rmin = std::min(rmin, res.y_at(i)[DustModel::R]);
+                rmax = std::max(rmax, res.y_at(i)[DustModel::R]);
+            }
+        if (rmax - rmin < 1e-3 * rmax) {
+            S.trapped = true;
+            S.r_trap_au = res.y_last[DustModel::R];
+        }
+    }
+
     // Trajectory-wide quantities
     const std::size_t n = res.t.size();
     double vmax = -1, amax = 0, remax = 0;
@@ -115,7 +134,7 @@ RunResult run(const RunConfig& cfg, const RunControl& ctl, bool keep_trajectory)
         S.warnings.push_back("Stokes drag used with Re up to " + std::to_string(remax) +
                              " > 1: Eq. (2) is outside its validity range (paper uses Re < 1 law only)");
     if (S.beta_extrapolated) S.warnings.push_back("tabulated beta_K evaluated outside its radial range (held constant)");
-    if (!S.reached_inner_edge && is_success(S.status))
+    if (!S.reached_inner_edge && is_success(S.status) && !S.trapped)
         S.warnings.push_back("particle did not reach r_in before t_end");
     if (keep_trajectory) {
         out.t = std::move(res.t);

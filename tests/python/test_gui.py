@@ -77,3 +77,21 @@ def test_gui_invalid_input_and_cancel(app, monkeypatch):
     a.on_cancel()
     _wait(a)
     assert a.result["summary"]["status"] == "cancelled"
+
+
+def test_gui_dead_zone_trap(app):
+    a, gui = app
+    a.vars["disk_model"].set("self_consistent")
+    a.vars["perturbation"].set("dead_zone_edge")
+    a.vars["bump_amplitude"].set("2.0")
+    a.vars["bump_r_au"].set("10.0")
+    a.vars["bump_width_au"].set("1.0")
+    a.vars["a_init_cm"].set("1.0")
+    a.vars["r_init_au"].set("15.0")
+    a.vars["t_end_yr"].set("3e6")
+    a.vars["sedimentation"].set(False)
+    a.on_run()
+    _wait(a)
+    s = a.result["summary"]
+    assert s["trapped"] and abs(s["r_trap_au"] - 10.67) < 0.01
+    assert "trapped" in a.text.get("1.0", "end")

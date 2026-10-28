@@ -23,6 +23,14 @@ enum class DragLaw : std::uint8_t {
     Both,     // Epstein for a/lambda < 3/2, Stokes otherwise (Sec. 1.4); continuous at the switch
 };
 
+// Grain charging (I, not in the paper): equilibrium charge of a grain collecting
+// electrons and ions in a thermal plasma, orbital-motion-limited theory
+// (Spitzer 1941; Draine & Sutin 1987) with n_e = n_i and unit sticking:
+//   exp(psi) sqrt(m_i/m_e) = 1 - psi,   Z = psi a k T / e^2   (psi ~ -3.9 for m_i = 29 amu).
+// Neglects electron depletion by grains (Havnes effect), which only lowers |Z|,
+// so the Lorentz force computed here is an upper bound.
+enum class ChargeModel : std::uint8_t { None, OML };
+
 struct Units {
     double r0_cm;   // 1 au
     double v0_cms;  // sqrt(G Msun / r0)
@@ -44,7 +52,14 @@ struct GrainParams {
     // NOT stated in the paper; default calibrated to the paper's statements
     // (see docs/physics_model.md, "Ambiguities"). Standard H2 value is 2e-15.
     double sigma_mol_cm2 = 1e-16;
+    // Charge and Lorentz force (I). With charge = OML and a disk magnetic field the
+    // equations of motion gain (Z e / m c) (v - u) x B (field lines move with the gas).
+    ChargeModel charge = ChargeModel::None;
+    double ion_mass_amu = 29.0;  // dominant molecular ion (HCO+)
 };
+
+// Dimensionless OML surface potential psi = Z e^2 / (a k T) for a given ion mass.
+[[nodiscard]] double oml_potential(double ion_mass_amu);
 
 // Local drag quantities (CGS) at a point.
 struct DragState {
@@ -79,6 +94,11 @@ public:
     [[nodiscard]] DragState drag_at(const Disk::Local& L, double a_cm) const;
     // Dimensionless stopping time tau_s / t0.
     [[nodiscard]] double tau_dimless(double r_au, double z_au, double a_cm) const;
+    // Grain charge number Z (0 without charging) and the Lorentz rate (Z e / m c) B
+    // [1/s] for the field component B [G].
+    [[nodiscard]] double charge_number(double T, double a_cm) const;
+    [[nodiscard]] double lorentz_rate(double T, double a_cm, double B) const;
+    [[nodiscard]] bool lorentz_active() const { return lorentz_; }
 
     // Keplerian speed and gas azimuthal speed, dimensionless.
     [[nodiscard]] double v_kepler(double r) const;
@@ -100,6 +120,8 @@ private:
     double vth_coef_;     // sqrt(8 k / (pi mu m_p))
     double lambda_coef_;  // mu m_p / sigma
     double coag_coef_;    // Y_d r0 / (4 rho_d a0)
+    double psi_ = 0;      // OML surface potential
+    bool lorentz_ = false;
     bool analytic_jacobian_ = true;
 };
 
@@ -108,6 +130,8 @@ struct Diagnostics {
     double t_yr, r_au, z_au, vr_cms, vz_cms, vphi_cms, a_cm;
     double T, rho, H_au, ur_cms, uphi_cms, beta;
     double vth, lambda_cm, tau_s, St, Re, dv_cms;
+    double Z_charge;   // grain charge number
+    double hall;       // Hall parameter (Z e B / m c) tau_s: >> 1 means the grain is tied to field lines
     bool stokes;
 };
 [[nodiscard]] Diagnostics diagnose(const DustModel& m, double t, std::span<const double> y);

@@ -59,6 +59,12 @@ Two fixes beyond the SciPy formulation:
 
 Simplified Newton iteration on `(I - c J) dy = c f(y) - psi - d`, at most 4 iterations,
 convergence-rate test `rate^(m-k)/(1-rate) * |dy| > tol` -> abort,
+a correction `|dy| <= 0.01 tol` counts as converged (as in CVODE), and a non-contracting
+iteration (`rate >= 1`) whose correction is already below 3 % of the error-test unit is
+accepted as converged at the round-off floor. Without these two rules a steady state (e.g. a
+dust trap, where v_r -> 0 and the error scale of v_r drops to atol ~1e-16, close to the
+round-off level ~1e-18 of its RHS) made Newton fail forever (millions of rejections);
+the error test still checks every accepted step,
 `rate/(1-rate) * |dy| < tol` -> converged, with `tol = max(10 eps/rtol, min(0.03, sqrt(rtol)))`.
 On failure the Jacobian is refreshed once (at the predictor), then the step is halved.
 Jacobian: analytic if provided (the dust model provides one, see `performance.md` for why
@@ -122,7 +128,7 @@ passes through the band.
 | model domain (`OdeSystem::in_domain`, e.g. r > 0, a > 0) | step rejected, h halved; `DomainViolation` after repeated failure; values are never clipped |
 | step below `10 ulp(t)` or user `h_min` | `StepSizeUnderflow` |
 | `t + h == t` | `TimeResolutionLost` |
-| increments lost (`y + dy == y`, `dy != 0`) | counted (`n_lost_increment`); with Kahan summation the increment is carried; only if *all* increments are lost for `max_stagnant_steps` (1000) consecutive steps -> `TimeResolutionLost` |
+| increments lost (`y + dy == y`, `dy != 0`) | counted (`n_lost_increment`). DOPRI5: harmless, the compensated summation carries the lost part. BDF: the signed sum of lost increments per component is accumulated while the component does not change; if it exceeds the error scale `atol + rtol|y|` -> `TimeResolutionLost` (`fail_on_lost_increments`). Steady states with sub-ulp noise are therefore not failures |
 | subnormals | not flushed (the dust `z` becomes subnormal after settling; harmless) |
 | FP contraction | `-ffp-contract=off` by default, so scalar results do not depend on the compiler's FMA fusion; explicit FMA only in NEON/AVX2 kernels; `-ffast-math` is never used |
 
@@ -134,3 +140,20 @@ and a message.
 The dust equations are integrated in the dimensionless variables of the paper (au, v_K(1au),
 t0, a/a_init), which keeps all state components within ~1e-7..1e2 and makes per-component
 `atol` meaningful. Outputs are converted back to CGS / au / yr.
+
+## Stochastic differential equations
+
+`dpd::ode::simulate` integrates Ito SDEs with diagonal noise, `dY = f dt + g dW`, with a
+fixed step (shortened to hit every output time):
+
+| scheme | order | use |
+|---|---|---|
+| Euler-Maruyama | weak 1, strong 1/2 | default, cheapest |
+| Milstein (diagonal) | strong 1 | path-wise accuracy; uses dg_i/dy_i (analytic or central FD) |
+| linear-implicit Euler | weak 1 | stiff dissipative drift: `Y+ = Y + (f h + g dW)/(1 - h df_i/dy_i)` (implicit only for df_i/dy_i < 0) |
+
+Random numbers: xoshiro256++ per path, seeded by splitmix64 of (seed, path index);
+normals by Box-Muller. Results are bitwise independent of the thread count. Paths with
+non-finite values are stored as NaN and counted (`Status::NonFiniteState`). Validation:
+`tests/cpp/test_sde.cpp` (OU discrete-variance identities, GBM strong orders,
+reproducibility, dust stationary state).

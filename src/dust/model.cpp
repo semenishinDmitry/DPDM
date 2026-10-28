@@ -42,6 +42,35 @@ DustModel::DustModel(const DiskParams& disk, const GrainParams& grain)
     vth_coef_ = std::sqrt(8 * cgs::k_B / (cgs::pi * g_.mu * cgs::m_p));
     lambda_coef_ = g_.mu * cgs::m_p / g_.sigma_mol_cm2;
     coag_coef_ = g_.dust_to_gas * u_.r0_cm / (4 * g_.rho_d * u_.a0_cm);
+    if (g_.charge == ChargeModel::OML) {
+        if (!(g_.ion_mass_amu > 0)) throw std::invalid_argument("grain: ion_mass_amu must be > 0");
+        psi_ = oml_potential(g_.ion_mass_amu);
+    }
+    lorentz_ = g_.charge != ChargeModel::None && disk_.has_field();
+}
+
+double oml_potential(double ion_mass_amu) {
+    // Solve exp(psi) * sqrt(m_i/m_e) = 1 - psi for psi < 0 (Newton, monotone).
+    const double s = std::sqrt(ion_mass_amu * cgs::amu / cgs::m_e);
+    double psi = -std::log(s);
+    for (int it = 0; it < 50; ++it) {
+        const double g = std::exp(psi) * s - (1 - psi);
+        const double dg = std::exp(psi) * s + 1;
+        const double step = g / dg;
+        psi -= step;
+        if (std::abs(step) < 1e-15) break;
+    }
+    return psi;
+}
+
+double DustModel::charge_number(double T, double a_cm) const {
+    return psi_ * a_cm * cgs::k_B * T / (cgs::e_esu * cgs::e_esu);
+}
+
+double DustModel::lorentz_rate(double T, double a_cm, double B) const {
+    // (Z e / m c) B with m = 4/3 pi a^3 rho_d
+    const double m = 4.0 / 3.0 * cgs::pi * a_cm * a_cm * a_cm * g_.rho_d;
+    return charge_number(T, a_cm) * cgs::e_esu * B / (m * cgs::c_light);
 }
 
 double DustModel::v_kepler(double r) const { return std::sqrt(gm_ / r); }
@@ -95,6 +124,15 @@ void DustModel::rhs(double, std::span<const double> y, std::span<double> f) cons
         f[Z] = 0;
         f[VZ] = 0;
     }
+    if (lorentz_) {
+        // (Z e / m c) (v - u) x B, B = (B_r, 0, B_z), gas velocity u = (u_r, u_phi, 0)
+        const double wz_ = lorentz_rate(L.T, a_cm, disk_.Bz(r)) * u_.t0_s;
+        const double wr_ = lorentz_rate(L.T, a_cm, disk_.Br(r)) * u_.t0_s;
+        const double dr_ = vr - ur, dp_ = vphi - uphi;
+        f[VR] += wz_ * dp_;
+        f[J] += r * (wr_ * vz - wz_ * dr_);
+        if (g_.sedimentation) f[VZ] += -wr_ * dp_;
+    }
     if (g_.coagulation) {
         const double dvr = vr - ur, dvp = vphi - uphi;
         f[A] = coag_coef_ * L.rho * std::sqrt(dvr * dvr + dvp * dvp + vz * vz);  // Eq. (10)
@@ -113,17 +151,18 @@ void DustModel::jacobian(double, std::span<const double> y, ode::DenseMatrix& Jm
     const Disk::Local L = disk_.local(r, z);
     const DragState d = drag_at(L, a_cm);
     const double inv = u_.t0_s / d.tau;
+    const Disk::Derivs dd = disk_.derivs(r);
     const double ur = L.ur / u_.v0_cms;
-    const double dur_dr = -0.625 * ur / r;
+    const double dur_dr = dd.dur / u_.v0_cms;
     const double sb = std::sqrt(1 - L.beta);
     const double vk = std::sqrt(gm_ / r);
     const double uphi = vk * sb;
-    const double duphi_dr = uphi * (-0.5 / r) - vk * disk_.dbeta_dr(r) / (2 * sb);
+    const double duphi_dr = uphi * (-0.5 / r) - vk * dd.dbeta / (2 * sb);
     // log-derivatives of rho, v_th and tau
     const double q2 = (z / L.H) * (z / L.H);
-    const double dlnrho_dr = (-21.0 / 16.0 + q2 * 15.0 / 16.0) / r;
+    const double dlnrho_dr = dd.dlnrho + q2 * dd.dlnH;
     const double dlnrho_dz = -z / (L.H * L.H);
-    const double dlnvth_dr = -9.0 / 16.0 / r;
+    const double dlnvth_dr = 0.5 * dd.dlnT;
     double dlntau_dr, dlntau_dz, dlntau_da;
     if (d.stokes) {  // tau_St ~ a^2 / v_th (independent of rho)
         dlntau_dr = -dlnvth_dr;
@@ -155,6 +194,31 @@ void DustModel::jacobian(double, std::span<const double> y, ode::DenseMatrix& Jm
         Jm(VZ, Z) = -gm_ / r3 - vz * dinv_dz;
         Jm(VZ, VZ) = -inv;
         Jm(VZ, A) = -vz * dinv_da;
+    }
+    if (lorentz_) {
+        // omega = (Z e / m c) B t0 ~ T B / a^2 (Z ~ a T, m ~ a^3)
+        const double wz_ = lorentz_rate(L.T, a_cm, disk_.Bz(r)) * u_.t0_s;
+        const double wr_ = lorentz_rate(L.T, a_cm, disk_.Br(r)) * u_.t0_s;
+        const double dlnw = dd.dlnT + dd.dlnB;
+        const double dwz_dr = wz_ * dlnw, dwr_dr = wr_ * dlnw;
+        const double dwz_da = -2 * wz_ / ah, dwr_da = -2 * wr_ / ah;
+        const double dp_ = j / r - uphi;
+        const double ddp_dr = -j / r2 - duphi_dr;
+        // f_VR += wz dp
+        Jm(VR, R) += dwz_dr * dp_ + wz_ * ddp_dr;
+        Jm(VR, J) += wz_ / r;
+        Jm(VR, A) += dwz_da * dp_;
+        // f_J += r (wr vz - wz dvr)
+        Jm(J, R) += (wr_ * vz - wz_ * dvr) + r * (dwr_dr * vz - dwz_dr * dvr + wz_ * dur_dr);
+        Jm(J, VR) += -r * wz_;
+        Jm(J, A) += r * (dwr_da * vz - dwz_da * dvr);
+        if (sed) {
+            Jm(J, VZ) += r * wr_;
+            // f_VZ += -wr dp
+            Jm(VZ, R) += -dwr_dr * dp_ - wr_ * ddp_dr;
+            Jm(VZ, J) += -wr_ / r;
+            Jm(VZ, A) += -dwr_da * dp_;
+        }
     }
     if (g_.coagulation) {
         const double dvp = j / r - uphi;
@@ -213,6 +277,9 @@ Diagnostics diagnose(const DustModel& m, double t, std::span<const double> y) {
     const double dvr = D.vr_cms - D.ur_cms, dvp = D.vphi_cms - D.uphi_cms;
     D.dv_cms = std::sqrt(dvr * dvr + dvp * dvp + D.vz_cms * D.vz_cms);
     D.Re = 2 * D.a_cm * D.rho * D.dv_cms / d.eta;
+    D.Z_charge = m.charge_number(D.T, D.a_cm);
+    const double Bmag = std::hypot(m.disk().Bz(D.r_au), m.disk().Br(D.r_au));
+    D.hall = std::abs(m.lorentz_rate(D.T, D.a_cm, Bmag)) * d.tau;
     return D;
 }
 

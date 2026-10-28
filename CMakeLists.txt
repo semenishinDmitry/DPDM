@@ -55,7 +55,7 @@ endif()
 add_library(dpd_ode
   src/ode/kernels.cpp src/ode/kernels_neon.cpp src/ode/kernels_avx2.cpp
   src/ode/linalg.cpp src/ode/jacobian.cpp src/ode/explicit.cpp src/ode/bdf.cpp
-  src/ode/integrate.cpp src/ode/test_problems.cpp)
+  src/ode/integrate.cpp src/ode/test_problems.cpp src/ode/sde.cpp)
 add_library(dpd::ode ALIAS dpd_ode)
 target_include_directories(dpd_ode PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
                                            $<INSTALL_INTERFACE:include>)
@@ -64,7 +64,8 @@ set_target_properties(dpd_ode PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # Physical model + configuration ----------------------------------------------
 add_library(dpd_dust
-  src/dust/disk.cpp src/dust/model.cpp src/dust/config.cpp src/dust/run.cpp src/dust/io.cpp)
+  src/dust/disk.cpp src/dust/model.cpp src/dust/config.cpp src/dust/run.cpp src/dust/io.cpp
+  src/dust/traps.cpp src/dust/diffusion.cpp)
 add_library(dpd::dust ALIAS dpd_dust)
 target_link_libraries(dpd_dust PUBLIC dpd_ode PRIVATE dpd_options tomlplusplus::tomlplusplus Threads::Threads)
 set_target_properties(dpd_dust PROPERTIES POSITION_INDEPENDENT_CODE ON)

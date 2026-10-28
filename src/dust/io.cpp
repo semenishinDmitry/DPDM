@@ -11,13 +11,13 @@ namespace dpd::dust {
 
 void write_csv(const RunResult& r, std::ostream& os) {
     os << "t_yr,r_au,z_au,vr_cms,vz_cms,vphi_cms,a_cm,St,tau_s,stokes,lambda_cm,Re,rho_gcc,T_K,H_au,ur_cms,"
-          "uphi_cms,beta,dv_cms\n";
+          "uphi_cms,beta,dv_cms,Z_charge,hall\n";
     os << std::setprecision(std::numeric_limits<double>::max_digits10);
     for (const Diagnostics& d : r.diag) {
         os << d.t_yr << ',' << d.r_au << ',' << d.z_au << ',' << d.vr_cms << ',' << d.vz_cms << ',' << d.vphi_cms
            << ',' << d.a_cm << ',' << d.St << ',' << d.tau_s << ',' << (d.stokes ? 1 : 0) << ',' << d.lambda_cm
            << ',' << d.Re << ',' << d.rho << ',' << d.T << ',' << d.H_au << ',' << d.ur_cms << ',' << d.uphi_cms
-           << ',' << d.beta << ',' << d.dv_cms << '\n';
+           << ',' << d.beta << ',' << d.dv_cms << ',' << d.Z_charge << ',' << d.hall << '\n';
     }
 }
 
@@ -66,6 +66,8 @@ void write_summary_json(const RunResult& r, const RunConfig& cfg, std::ostream& 
     os << "  \"r_at_vr_max_au\": "; num(os, s.r_at_vr_max_au); os << ",\n";
     os << "  \"a_max_cm\": "; num(os, s.a_max_cm); os << ",\n";
     os << "  \"max_Re\": "; num(os, s.max_Re); os << ",\n";
+    os << "  \"trapped\": " << (s.trapped ? "true" : "false") << ",\n";
+    os << "  \"r_trap_au\": "; num(os, s.r_trap_au); os << ",\n";
     os << "  \"stokes_regime_seen\": " << (s.stokes_regime_seen ? "true" : "false") << ",\n";
     os << "  \"final_method\": \"" << ode::to_string(s.final_method) << "\",\n";
     os << "  \"wall_time_s\": " << s.wall_time_s << ",\n";

@@ -1,6 +1,7 @@
 add_executable(dpd_tests
   test_kernels.cpp test_linalg.cpp test_explicit.cpp test_bdf.cpp test_auto.cpp
-  test_failures.cpp test_events.cpp test_dust.cpp test_paper.cpp test_config.cpp)
+  test_failures.cpp test_events.cpp test_dust.cpp test_paper.cpp test_config.cpp test_traps.cpp
+  test_charge.cpp test_sde.cpp)
 target_link_libraries(dpd_tests PRIVATE dpd_dust Catch2::Catch2WithMain dpd_options)
 target_compile_definitions(dpd_tests PRIVATE DPD_SOURCE_DIR="${PROJECT_SOURCE_DIR}")
 

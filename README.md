@@ -32,6 +32,8 @@ max |v_r|      : 54.6303 m/s at r = 0.363038 au
 ```bash
 dustppd run <config.toml> [-o traj.csv] [-s summary.json] [--set section.key=value]...
 dustppd sweep <config.toml> --param particle.a_init_cm --values 1e-4,0.1,1,10,100 --threads 8
+dustppd traps <config.toml> [--sizes 1e-3,0.1,1] [--rmin 1 --rmax 100]   # trap radii, minimum trapped size
+dustppd diffuse <config.toml> --r 100 --a 0.1 --alpha 1e-4 [--paths 20000]  # stochastic vertical mixing
 dustppd show-config <config.toml> [--set ...]      # print the effective configuration
 dustppd info                                       # SIMD backends, code units
 ```
@@ -114,6 +116,7 @@ Link `dpd::ode` (core) and `dpd::dust` (model). See `docs/architecture.md`.
 | `docs/architecture.md` | code structure and design decisions |
 | `docs/testing.md` | test suite, reference data provenance, tolerance policy |
 | `docs/performance.md` | benchmarks, SIMD, linear-solver crossover |
+| `docs/science_extensions.md` | dust traps with a fossil field, stochastic turbulent mixing, charged grains |
 | `docs/gpu.md` | experimental Metal/CUDA ensemble benchmark and conclusions |
 
 ## Status and limitations
@@ -122,8 +125,12 @@ Production: DOPRI5, BDF (1-5) with dense LU, auto switching explicit -> implicit
 Newton-Krylov/GMRES (tested on the provided systems), event location, the dust model
 with the analytic disk. Verification only: RK4.
 
+Extensions (see `docs/science_extensions.md`): self-consistent and tabulated disks with
+dust-trap analysis, a stochastic (SDE) solver with vertical turbulent mixing of dust, OML
+grain charging and the Lorentz force of the fossil field.
+
 Not implemented: switching back implicit -> explicit, backward integration, DAEs,
-the numerical "Belmondo" disk (no data; only a tabulated `beta_K(r)` can be supplied),
+the Belmondo disk itself (no data; full profile tables can be loaded),
 fragmentation, turbulence, charged grains. Two model parameters are not given in the
 paper and were calibrated (`sigma_mol`, `settle_eps`; `docs/physics_model.md`).
 The AVX2 kernels are only compiled/tested in x86 CI, not on the development machine.

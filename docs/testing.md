@@ -2,7 +2,7 @@
 
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build
-ctest --test-dir build                     # 65 tests: Catch2 cases, allocation audit, CLI
+ctest --test-dir build                     # Catch2 cases, allocation audit, CLI
 ./build/tests/cpp/dpd_tests "[paper]"      # only the paper regression
 pip install ".[test]" && pytest tests/python   # against the *installed* package
 ```
@@ -23,6 +23,9 @@ pip install ".[test]" && pytest tests/python   # against the *installed* package
 | `[dust]` | disk profiles = Eqs. 12-13, 19; tau_Ep = Eq. 3 / 20; drag switch continuity; units; RHS at a state vs hand evaluation of Eq. 11; switches off; stationary drift vs analytic law; beta = 0 drift time vs analytic integral (1e-4); coagulation monotone / Y_d = 0; constraints along trajectories; tabulated beta; cross-check vs independent SciPy model (2e-6); method agreement; ensembles = serial; paper's analytic sedimentation solutions (Sec. 3.2.1) | analytic / SciPy |
 | `[paper]` | Tables 1, 2, 4, Fig. 12, reference case (see below) | paper |
 | `[config]` | parsing, overrides, unknown keys, round trip (incl. escaping, extreme floats), beta tables | - |
+| `[traps]` | self-consistent beta (Eq. 16), magnetic tension formula, zero head wind = pressure maximum, trap root = ODE equilibrium, minimum trapped size, tabulated profile = analytic disk | analytic / independent search |
+| `[charge]` | OML potential vs independent bisection, Lorentz force does no work, Z and Hall diagnostics, Jacobian with Lorentz terms vs FD, negligible-Hall limit | analytic |
+| `[sde]` | RNG moments and reproducibility, OU discrete stationary variances (exact formulas), weak convergence, GBM strong orders 1/2 and 1, thread independence, dust stationary state vs exact quadrature, Dubrulle limit | exact |
 
 ## Reference data and provenance
 

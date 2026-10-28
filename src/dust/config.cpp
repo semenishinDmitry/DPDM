@@ -68,8 +68,10 @@ void check_known(const toml::table& t) {
         {"run", {"name", "description", "t_end_yr"}},
         {"particle", {"a_init_cm", "rho_d", "r_init_au", "z_init_H", "vr_init_cms", "vz_init_cms"}},
         {"physics", {"drag", "coagulation", "sedimentation", "dust_to_gas", "sigma_mol_cm2", "mu", "r_in_au",
-                     "settle_eps"}},
-        {"disk", {"model", "alpha", "mdot", "mstar", "vphi2vk", "beta_table", "T1", "rho1", "ur1", "H1"}},
+                     "settle_eps", "charge", "ion_mass_amu"}},
+        {"disk", {"model", "alpha", "mdot", "mstar", "vphi2vk", "beta_table", "profile_table", "T1", "rho1", "ur1",
+                  "H1", "perturbation", "bump_amplitude", "bump_r_au", "bump_width_au", "magnetic_tension"}},
+        {"field", {"B0_G", "exponent", "br_over_bz"}},
         {"solver", {"method", "rtol", "atol", "h_max", "max_steps", "linear_solver", "bdf_max_order", "rk4_step"}},
         {"output", {"save_steps"}},
     };
@@ -144,8 +146,17 @@ RunConfig parse_config(const std::string& text, const std::string& base_dir, con
     get(t, "physics", "r_in_au", c.r_in_au);
     get(t, "physics", "settle_eps", c.settle_eps);
 
+    c.disk.mu = c.grain.mu;
+    std::string charge = c.grain.charge == ChargeModel::OML ? "oml" : "none";
+    get(t, "physics", "charge", charge);
+    if (charge == "oml") c.grain.charge = ChargeModel::OML;
+    else if (charge == "none") c.grain.charge = ChargeModel::None;
+    else throw std::invalid_argument("unknown physics.charge '" + charge + "' (expected none|oml)");
+    get(t, "physics", "ion_mass_amu", c.grain.ion_mass_amu);
+
     std::string model = "analytic";
     get(t, "disk", "model", model);
+    c.disk.model = disk_model_from_string(model);
     get(t, "disk", "alpha", c.disk.alpha);
     get(t, "disk", "mdot", c.disk.mdot);
     get(t, "disk", "mstar", c.disk.mstar);
@@ -154,18 +165,41 @@ RunConfig parse_config(const std::string& text, const std::string& base_dir, con
     get(t, "disk", "rho1", c.disk.rho1);
     get(t, "disk", "ur1", c.disk.ur1);
     get(t, "disk", "H1", c.disk.H1);
+    std::string pert = "none";
+    get(t, "disk", "perturbation", pert);
+    c.disk.perturbation = perturbation_from_string(pert);
+    get(t, "disk", "bump_amplitude", c.disk.bump_amplitude);
+    get(t, "disk", "bump_r_au", c.disk.bump_r_au);
+    get(t, "disk", "bump_width_au", c.disk.bump_width_au);
+    get(t, "disk", "magnetic_tension", c.disk.magnetic_tension);
+    get(t, "field", "B0_G", c.disk.field.B0_G);
+    get(t, "field", "exponent", c.disk.field.exponent);
+    get(t, "field", "br_over_bz", c.disk.field.br_over_bz);
     get(t, "disk", "beta_table", c.beta_table_path);
-    if (model == "tabulated_beta") {
-        if (c.beta_table_path.empty()) throw std::invalid_argument("disk.model = tabulated_beta needs disk.beta_table");
-        fs::path p(c.beta_table_path);
+    get(t, "disk", "profile_table", c.profile_table_path);
+    auto resolve = [&](std::string& path) {
+        fs::path p(path);
         if (p.is_relative()) p = fs::path(base_dir) / p;
-        c.beta_table_path = p.lexically_normal().string();
+        path = p.lexically_normal().string();
+    };
+    if (c.disk.perturbation != Perturbation::None && c.disk.model != DiskModel::SelfConsistent)
+        throw std::invalid_argument("disk.perturbation requires disk.model = self_consistent");
+    if (c.disk.model == DiskModel::TabulatedBeta) {
+        if (c.beta_table_path.empty()) throw std::invalid_argument("disk.model = tabulated_beta needs disk.beta_table");
+        resolve(c.beta_table_path);
         load_beta_table(c.beta_table_path, c.disk);
-    } else if (model != "analytic") {
-        throw std::invalid_argument("unknown disk.model '" + model + "' (expected analytic|tabulated_beta)");
     } else {
         c.beta_table_path.clear();
     }
+    if (c.disk.model == DiskModel::Tabulated) {
+        if (c.profile_table_path.empty()) throw std::invalid_argument("disk.model = tabulated needs disk.profile_table");
+        resolve(c.profile_table_path);
+        c.disk.table = load_profile_table(c.profile_table_path);
+        c.disk.table_source = c.profile_table_path;
+    } else {
+        c.profile_table_path.clear();
+    }
+    (void)Disk(c.disk);  // validate now (clear error at load time)
 
     std::string method = std::string(ode::to_string(c.solver.method));
     get(t, "solver", "method", method);
@@ -259,9 +293,21 @@ std::string to_toml(const RunConfig& c) {
     kv("mu", tv(c.grain.mu));
     kv("r_in_au", tv(c.r_in_au));
     kv("settle_eps", tv(c.settle_eps));
+    kv("charge", tv(c.grain.charge == ChargeModel::OML ? "oml" : "none"));
+    kv("ion_mass_amu", tv(c.grain.ion_mass_amu));
+    os << "\n[field]\n";
+    kv("B0_G", tv(c.disk.field.B0_G));
+    kv("exponent", tv(c.disk.field.exponent));
+    kv("br_over_bz", tv(c.disk.field.br_over_bz));
     os << "\n[disk]\n";
-    kv("model", tv(c.beta_table_path.empty() ? "analytic" : "tabulated_beta"));
+    kv("model", tv(to_string(c.disk.model)));
     if (!c.beta_table_path.empty()) kv("beta_table", tv(c.beta_table_path));
+    if (!c.profile_table_path.empty()) kv("profile_table", tv(c.profile_table_path));
+    kv("perturbation", tv(to_string(c.disk.perturbation)));
+    kv("bump_amplitude", tv(c.disk.bump_amplitude));
+    kv("bump_r_au", tv(c.disk.bump_r_au));
+    kv("bump_width_au", tv(c.disk.bump_width_au));
+    kv("magnetic_tension", tv(c.disk.magnetic_tension));
     kv("alpha", tv(c.disk.alpha));
     kv("mdot", tv(c.disk.mdot));
     kv("mstar", tv(c.disk.mstar));

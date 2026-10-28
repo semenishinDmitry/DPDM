@@ -86,6 +86,10 @@ u_phi = v_K sqrt(1 - beta_K)                                      (Eq. 5)
 Analytic disk: constant `beta_K = 1 - (u_phi/v_K)^2` with `u_phi/v_K = 0.9987`
 (P, Sec. 2.6, Table 5 `vphi2vk`), i.e. `beta_K = 0.0025983`.
 
+Further disk models (I): `self_consistent` (beta_K from Eq. 16, i.e. gas pressure gradient
+plus magnetic tension, with optional pressure bumps or a dead-zone edge) and `tabulated`
+(full radial profiles, e.g. Belmondo output). See `docs/science_extensions.md`.
+
 Tabulated `beta_K(r)` (I): a CSV of `(r_au, beta)` is interpolated linearly in `log r`
 and held constant outside its range (flagged in the run summary). The structure
 `T, rho, u_r, H` stays analytic in this mode.

@@ -70,7 +70,7 @@ analytic disk, calibrated sigma_mol = 1e-16 cm^2 and settle_eps = 0.005 (see phy
 | t_sed [yr] | 252 | 251.1 |
 | t_drift [kyr] | 306 | 304.7 |
 | max abs(v_r) [m/s] | 58.5 | 54.63 |
-| r at max |v_r| [au] | 0.31 | 0.363 |
+| r at max |v_r| [au] | 0.31 | 0.3625 |
 | abs(v_r) at r_in [m/s] | 33.5 | 29.67 |
 
 ![reference case](figures/reference_case.png)

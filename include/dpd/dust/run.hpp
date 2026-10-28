@@ -29,6 +29,10 @@ struct RunSummary {
     bool stokes_regime_seen = false;
     bool epstein_regime_seen = false;
     bool beta_extrapolated = false;    // tabulated beta used outside its radial range
+    // Trapping: the run reached t_end without reaching r_in and r changed by less
+    // than 1e-3 r over the last 10 % of the time.
+    bool trapped = false;
+    double r_trap_au = kNaN;
     std::vector<std::string> warnings;
     ode::Stats stats;
     ode::Method final_method = ode::Method::Dopri5;

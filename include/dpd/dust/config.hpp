@@ -36,7 +36,8 @@ struct RunConfig {
     double settle_eps = 0.005;    // settled when |z| <= settle_eps * z_init (calibrated; see docs)
     SolverConfig solver;
     bool save_steps = true;
-    std::string beta_table_path;  // CSV (r_au, beta_K) for disk.model = "tabulated_beta"
+    std::string beta_table_path;     // CSV (r_au, beta_K) for disk.model = "tabulated_beta"
+    std::string profile_table_path;  // CSV profile for disk.model = "tabulated"
 };
 
 // Parse/serialize. Relative paths inside the file are resolved against base_dir.

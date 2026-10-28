@@ -50,6 +50,15 @@ FIELDS = [
         ("Mdot [1e-8 Msun/yr]", "mdot", float),
         ("M_star [Msun]", "mstar", float),
         ("u_phi / v_K (analytic beta)", "vphi2vk", float),
+        ("perturbation amplitude A", "bump_amplitude", float),
+        ("perturbation radius [au]", "bump_r_au", float),
+        ("perturbation width [au]", "bump_width_au", float),
+    ]),
+    ("Fossil field / charge", [
+        ("B0 at 1 au [G]", "B0_G", float),
+        ("field exponent", "field_exponent", float),
+        ("B_r / B_z", "br_over_bz", float),
+        ("ion mass [amu]", "ion_mass_amu", float),
     ]),
     ("Solver", [
         ("rtol", "rtol", float),
@@ -66,6 +75,8 @@ PLOTS = {
     "a(t)": ("t_yr", "a_cm", "log", "log"),
     "St(r)": ("r_au", "St", "log", "log"),
     "Re(r)": ("r_au", "Re", "log", "log"),
+    "beta(r)": ("r_au", "beta", "log", "linear"),
+    "Hall(r)": ("r_au", "hall", "log", "log"),
 }
 
 
@@ -117,6 +128,23 @@ class App(tk.Tk):
                 self.vars["sedimentation"] = tk.BooleanVar()
                 ttk.Checkbutton(box, text="coagulation (Eq. 10)", variable=self.vars["coagulation"]).pack(anchor=tk.W)
                 ttk.Checkbutton(box, text="sedimentation (2D)", variable=self.vars["sedimentation"]).pack(anchor=tk.W)
+            if section == "Disk":
+                for label, attr, values in (("disk model", "disk_model",
+                                             ["analytic", "self_consistent", "tabulated_beta", "tabulated"]),
+                                            ("perturbation", "perturbation", ["none", "gaussian", "dead_zone_edge"])):
+                    row = ttk.Frame(box)
+                    row.pack(fill=tk.X)
+                    ttk.Label(row, text=label, width=30).pack(side=tk.LEFT)
+                    self.vars[attr] = tk.StringVar()
+                    ttk.Combobox(row, textvariable=self.vars[attr], values=values, width=14,
+                                 state="readonly").pack(side=tk.RIGHT)
+            if section == "Fossil field / charge":
+                row = ttk.Frame(box)
+                row.pack(fill=tk.X)
+                ttk.Label(row, text="grain charge", width=30).pack(side=tk.LEFT)
+                self.vars["charge"] = tk.StringVar()
+                ttk.Combobox(row, textvariable=self.vars["charge"], values=["none", "oml"], width=11,
+                             state="readonly").pack(side=tk.RIGHT)
             if section == "Disk":
                 row = ttk.Frame(box)
                 row.pack(fill=tk.X)
@@ -173,7 +201,7 @@ class App(tk.Tk):
         for _, fields in FIELDS:
             for _, attr, _t in fields:
                 self.vars[attr].set(repr(getattr(self.cfg, attr)))
-        for attr in ("drag", "method", "linear_solver", "beta_table"):
+        for attr in ("drag", "method", "linear_solver", "beta_table", "disk_model", "perturbation", "charge"):
             self.vars[attr].set(getattr(self.cfg, attr))
         self.vars["coagulation"].set(self.cfg.coagulation)
         self.vars["sedimentation"].set(self.cfg.sedimentation)
@@ -195,7 +223,15 @@ class App(tk.Tk):
         cfg.linear_solver = self.vars["linear_solver"].get()
         cfg.coagulation = bool(self.vars["coagulation"].get())
         cfg.sedimentation = bool(self.vars["sedimentation"].get())
-        cfg.beta_table = self.vars["beta_table"].get()
+        cfg.charge = self.vars["charge"].get()
+        cfg.perturbation = self.vars["perturbation"].get()
+        model = self.vars["disk_model"].get()
+        if model == "tabulated_beta":
+            cfg.beta_table = self.vars["beta_table"].get()
+        else:
+            cfg.beta_table = ""
+            if model != "tabulated":
+                cfg.disk_model = model
         # Validate exactly like the CLI/TOML path does.
         return dp.parse_config(cfg.to_toml())
 
@@ -310,6 +346,7 @@ class App(tk.Tk):
             f"max |v_r|           {s['vr_max_cms'] / 100:.6g} m/s at r = {s['r_at_vr_max_au']:.4g} au",
             f"a_final / a_max     {s['a_final_cm']:.6g} / {s['a_max_cm']:.6g} cm",
             f"Stokes regime seen  {s['stokes_regime_seen']} (max Re {s['max_Re']:.3g})",
+            f"trapped             {s['trapped']}" + (f" at r = {s['r_trap_au']:.6g} au" if s['trapped'] else ""),
             "",
             f"final method {s['final_method']}; steps {st['n_steps']}, rejected "
             f"{st['n_reject_error']} (error) + {st['n_reject_newton']} (Newton), RHS {st['n_rhs']}, "
