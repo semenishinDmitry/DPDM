@@ -47,7 +47,8 @@ def test_vertical_diffusion_matches_exact_solution():
     assert abs(r["Hd_simulated_au"] - r["Hd_exact_au"]) < 4 * r["Hd_stat_error_au"] + 0.01 * r["Hd_exact_au"]
     z = np.linspace(-5 * r["H_au"], 5 * r["H_au"], 2001)
     st = dp.stationary_dust_density(c, 100.0, 0.1, 1e-4, z)
-    assert np.trapz(st["density"], z) == pytest.approx(1.0, rel=1e-9)
+    d = st["density"]
+    assert float(np.sum(0.5 * (d[1:] + d[:-1]) * np.diff(z))) == pytest.approx(1.0, rel=1e-9)  # trapezoid rule
     assert st["Hd_exact_au"] == pytest.approx(r["Hd_exact_au"], rel=1e-12)
     # reproducible with the same seed
     r2 = dp.vertical_diffusion(c, r_au=100.0, a_cm=0.1, alpha_turb=1e-4, n_paths=20000)
