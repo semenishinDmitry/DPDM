@@ -1,0 +1,21 @@
+# EXPERIMENTAL GPU ensemble benchmarks (not part of the library).
+if(APPLE)
+  enable_language(OBJCXX)
+  add_executable(metal_ensemble_bench metal_ensemble_bench.mm)
+  target_include_directories(metal_ensemble_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(metal_ensemble_bench PRIVATE
+    DPD_GPU_HEADER="${CMAKE_CURRENT_SOURCE_DIR}/ensemble_kernel.h")
+  target_compile_options(metal_ensemble_bench PRIVATE -fobjc-arc -ffp-contract=off)
+  target_link_libraries(metal_ensemble_bench PRIVATE dpd_dust "-framework Metal" "-framework Foundation")
+endif()
+
+include(CheckLanguage)
+check_language(CUDA)
+if(CMAKE_CUDA_COMPILER)
+  enable_language(CUDA)
+  add_executable(cuda_ensemble_bench cuda_ensemble_bench.cu)
+  target_include_directories(cuda_ensemble_bench PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  set_target_properties(cuda_ensemble_bench PROPERTIES CUDA_STANDARD 17 CUDA_ARCHITECTURES "70;80;89")
+else()
+  message(STATUS "GPU experiments: no CUDA compiler, cuda_ensemble_bench not built")
+endif()

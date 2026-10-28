@@ -18,6 +18,7 @@ option(DPD_ENABLE_SIMD "Build explicit SIMD kernels (NEON / AVX2 runtime dispatc
 option(DPD_STRICT_FP "Disable floating-point contraction outside explicit FMA kernels" ON)
 option(DPD_NATIVE "Compile for the host CPU (-march=native); not portable" OFF)
 option(DPD_WERROR "Treat warnings as errors" OFF)
+option(DPD_BUILD_GPU_EXPERIMENTS "Build experimental Metal/CUDA ensemble benchmarks" OFF)
 set(DPD_SANITIZE "" CACHE STRING "Sanitizers: '', 'address,undefined', 'thread'")
 
 include(cmake/Dependencies.cmake)
@@ -84,6 +85,10 @@ endif()
 
 if(DPD_BUILD_PYTHON)
   add_subdirectory(python)
+endif()
+
+if(DPD_BUILD_GPU_EXPERIMENTS)
+  add_subdirectory(experiments/gpu)
 endif()
 
 include(GNUInstallDirs)

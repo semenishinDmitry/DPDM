@@ -61,6 +61,15 @@ jobs:
           python -c "import dustppd; print(dustppd.__file__, dustppd.available_backends())"
           python -m pytest "$GITHUB_WORKSPACE/tests/python" -q -k "not gui"
 
+  cuda-compile:
+    # No GPU runners: this only checks that the experimental CUDA code compiles.
+    runs-on: ubuntu-24.04
+    container: nvidia/cuda:12.6.3-devel-ubuntu24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: nvcc compile check
+        run: nvcc -O3 -std=c++17 -arch=sm_80 experiments/gpu/cuda_ensemble_bench.cu -o cuda_ensemble_bench
+
   format:
     runs-on: ubuntu-24.04
     steps:

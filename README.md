@@ -114,6 +114,7 @@ Link `dpd::ode` (core) and `dpd::dust` (model). See `docs/architecture.md`.
 | `docs/architecture.md` | code structure and design decisions |
 | `docs/testing.md` | test suite, reference data provenance, tolerance policy |
 | `docs/performance.md` | benchmarks, SIMD, linear-solver crossover |
+| `docs/gpu.md` | experimental Metal/CUDA ensemble benchmark and conclusions |
 
 ## Status and limitations
 
