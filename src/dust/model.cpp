@@ -103,6 +103,74 @@ void DustModel::rhs(double, std::span<const double> y, std::span<double> f) cons
     }
 }
 
+void DustModel::jacobian(double, std::span<const double> y, ode::DenseMatrix& Jm) const {
+    const bool sed = g_.sedimentation;
+    const double r = y[R], vr = y[VR], j = y[J];
+    const double z = sed ? y[Z] : 0.0;
+    const double vz = sed ? y[VZ] : 0.0;
+    const double ah = y[A];
+    const double a_cm = ah * u_.a0_cm;
+    const Disk::Local L = disk_.local(r, z);
+    const DragState d = drag_at(L, a_cm);
+    const double inv = u_.t0_s / d.tau;
+    const double ur = L.ur / u_.v0_cms;
+    const double dur_dr = -0.625 * ur / r;
+    const double sb = std::sqrt(1 - L.beta);
+    const double vk = std::sqrt(gm_ / r);
+    const double uphi = vk * sb;
+    const double duphi_dr = uphi * (-0.5 / r) - vk * disk_.dbeta_dr(r) / (2 * sb);
+    // log-derivatives of rho, v_th and tau
+    const double q2 = (z / L.H) * (z / L.H);
+    const double dlnrho_dr = (-21.0 / 16.0 + q2 * 15.0 / 16.0) / r;
+    const double dlnrho_dz = -z / (L.H * L.H);
+    const double dlnvth_dr = -9.0 / 16.0 / r;
+    double dlntau_dr, dlntau_dz, dlntau_da;
+    if (d.stokes) {  // tau_St ~ a^2 / v_th (independent of rho)
+        dlntau_dr = -dlnvth_dr;
+        dlntau_dz = 0;
+        dlntau_da = 2 / ah;
+    } else {         // tau_Ep ~ a / (rho v_th)
+        dlntau_dr = -dlnrho_dr - dlnvth_dr;
+        dlntau_dz = -dlnrho_dz;
+        dlntau_da = 1 / ah;
+    }
+    const double dinv_dr = -inv * dlntau_dr, dinv_dz = -inv * dlntau_dz, dinv_da = -inv * dlntau_da;
+    const double r2 = r * r, r3 = r2 * r, r4 = r3 * r;
+    const double dvr = vr - ur;
+    const double w = j - r * uphi;  // r (v_phi - u_phi)
+    Jm.fill(0);
+    Jm(R, VR) = 1;
+    Jm(VR, R) = -3 * j * j / r4 + 2 * gm_ / r3 + dur_dr * inv - dvr * dinv_dr;
+    Jm(VR, VR) = -inv;
+    Jm(VR, J) = 2 * j / r3;
+    Jm(VR, A) = -dvr * dinv_da;
+    Jm(J, R) = -dinv_dr * w + inv * (uphi + r * duphi_dr);
+    Jm(J, J) = -inv;
+    Jm(J, A) = -dinv_da * w;
+    if (sed) {
+        Jm(VR, Z) = -dvr * dinv_dz;
+        Jm(J, Z) = -dinv_dz * w;
+        Jm(Z, VZ) = 1;
+        Jm(VZ, R) = 3 * gm_ * z / r4 - vz * dinv_dr;
+        Jm(VZ, Z) = -gm_ / r3 - vz * dinv_dz;
+        Jm(VZ, VZ) = -inv;
+        Jm(VZ, A) = -vz * dinv_da;
+    }
+    if (g_.coagulation) {
+        const double dvp = j / r - uphi;
+        const double D = std::sqrt(dvr * dvr + dvp * dvp + vz * vz);
+        const double crho = coag_coef_ * L.rho;
+        Jm(A, R) = crho * dlnrho_dr * D;
+        if (sed) Jm(A, Z) = crho * dlnrho_dz * D;
+        if (D > 0) {
+            Jm(A, R) += crho / D * (dvr * (-dur_dr) + dvp * (-j / r2 - duphi_dr));
+            Jm(A, VR) = crho * dvr / D;
+            Jm(A, J) = crho * dvp / (D * r);
+            if (sed) Jm(A, VZ) = crho * vz / D;
+        }
+    }
+}
+
 bool DustModel::in_domain(double, std::span<const double> y) const {
     return y[R] > 0 && y[A] > 0 && std::isfinite(y[R]) && std::isfinite(y[A]);
 }

@@ -39,6 +39,7 @@ public:
     [[nodiscard]] double rho(double r, double z) const;        // g cm^-3, Eq. (19)
     [[nodiscard]] double ur_cgs(double r) const;               // cm s^-1
     [[nodiscard]] double beta(double r) const;                 // dimensionless
+    [[nodiscard]] double dbeta_dr(double r) const;             // d beta / dr [1/au] (0 outside a table)
     [[nodiscard]] bool beta_extrapolated(double r) const;      // outside table range
     [[nodiscard]] bool tabulated() const { return !p_.beta_r_au.empty(); }
     [[nodiscard]] const DiskParams& params() const { return p_; }

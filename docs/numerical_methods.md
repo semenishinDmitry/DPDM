@@ -61,7 +61,8 @@ Simplified Newton iteration on `(I - c J) dy = c f(y) - psi - d`, at most 4 iter
 convergence-rate test `rate^(m-k)/(1-rate) * |dy| > tol` -> abort,
 `rate/(1-rate) * |dy| < tol` -> converged, with `tol = max(10 eps/rtol, min(0.03, sqrt(rtol)))`.
 On failure the Jacobian is refreshed once (at the predictor), then the step is halved.
-Jacobian: analytic if provided, otherwise forward differences column by column with the
+Jacobian: analytic if provided (the dust model provides one, see `performance.md` for why
+finite differences fail there), otherwise forward differences column by column with the
 CVODE-style increment `max(sqrt(eps)|y_j|, 1000 |h| eps n ||f|| * w_j^-1)`.
 
 ### Linear solvers

@@ -67,6 +67,13 @@ public:
     [[nodiscard]] ode::Index size() const override { return kSize; }
     void rhs(double t, std::span<const double> y, std::span<double> dydt) const override;
     [[nodiscard]] bool in_domain(double t, std::span<const double> y) const override;
+    // Analytic Jacobian of Eqs. (11). Finite differences are unreliable here: the
+    // coagulation rate depends on |v - u|, which for small grains is ~1e-9 in code
+    // units -- far below a sqrt(eps)-sized perturbation of j -- and is not
+    // differentiable at |v - u| = 0 (zero is used there, a valid subgradient).
+    [[nodiscard]] bool has_jacobian() const override { return analytic_jacobian_; }
+    void jacobian(double t, std::span<const double> y, ode::DenseMatrix& J) const override;
+    void set_analytic_jacobian(bool on) { analytic_jacobian_ = on; }
 
     [[nodiscard]] DragState drag(double r_au, double z_au, double a_cm) const;
     [[nodiscard]] DragState drag_at(const Disk::Local& L, double a_cm) const;
@@ -93,6 +100,7 @@ private:
     double vth_coef_;     // sqrt(8 k / (pi mu m_p))
     double lambda_coef_;  // mu m_p / sigma
     double coag_coef_;    // Y_d r0 / (4 rho_d a0)
+    bool analytic_jacobian_ = true;
 };
 
 // Derived per-point diagnostics (for output and validation).

@@ -4,6 +4,24 @@ Measured with `./build/bench/dpd_bench` (Release, `-O3 -ffp-contract=off`), Appl
 (10 cores), macOS 27, Apple clang 21. Best of 3-7 repetitions after a warm-up. Wall times
 are machine-specific; accuracy is reported next to every timing.
 
+## Time to reproduce the paper
+
+All 40 runs behind `docs/validation.md` (Tables 1, 2, 4, Fig. 12, reference case):
+
+| | serial | 10 threads |
+|---|---|---|
+| before the analytic Jacobian | 1.73 s | 1.62 s |
+| now | **0.10 s** | **0.02 s** |
+
+Before, one run took 1.63 s of the total: 1 um grain from 1 au with coagulation
+(Table 4). The coagulation rate depends on `|v - u|`, which for micron grains is ~4e-9 in
+code units, smaller than the finite-difference perturbation of `j` (~1.5e-8). The FD
+Jacobian of that row was therefore wrong and Newton failed 1.9 million times
+(1.5 M steps). With the analytic Jacobian (`DustModel::jacobian`, tested against
+central differences) the run needs 576 steps and 0.9 ms; the result is unchanged
+(7049.03 yr). The slowest remaining run is the 1 m body from 100 au with sedimentation
+(~8 ms, 12 000 steps: weakly damped vertical oscillations).
+
 ## Dust model, complete runs
 
 Error = relative error of `t_drift` vs BDF at rtol = 1e-12.

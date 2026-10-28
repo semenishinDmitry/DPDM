@@ -313,3 +313,44 @@ TEST_CASE("analytic sedimentation solutions of Sec. 3.2.1 (constant tau_s)", "[d
         }
     }
 }
+
+TEST_CASE("analytic Jacobian matches central finite differences", "[dust][jacobian]") {
+    // Points with |v - u| large enough for finite differences to be trustworthy.
+    struct Pt { double a, r, z; bool sed, coag; DragLaw drag; double dvr, dj; };
+    for (const Pt p : {Pt{1.0, 3.0, 0.05, true, true, DragLaw::Both, 1e-4, 1e-3},
+                       Pt{100.0, 0.3, 0.001, true, true, DragLaw::Both, 3e-4, 2e-3},     // Stokes regime
+                       Pt{10.0, 20.0, 0.5, true, false, DragLaw::Epstein, 1e-5, -1e-3},
+                       Pt{0.1, 5.0, 0.0, false, true, DragLaw::Epstein, 2e-5, 5e-4}}) {
+        GrainParams g;
+        g.a_init_cm = p.a;
+        g.sedimentation = p.sed;
+        g.coagulation = p.coag;
+        g.drag = p.drag;
+        DiskParams dp;
+        dp.beta_r_au = {0.1, 1.0, 10.0, 100.0};
+        dp.beta_values = {0.002, 0.004, 0.01, 0.03};  // non-zero d beta / dr
+        DustModel m(dp, g);
+        auto y = m.initial_state(p.r, p.z, 0, 0);
+        y[DustModel::VR] += p.dvr;
+        y[DustModel::J] *= 1 + p.dj;
+        if (p.sed) y[DustModel::VZ] = -2e-4;
+        y[DustModel::A] = 1.3;
+        ode::DenseMatrix Ja(6, 6);
+        m.jacobian(0, y, Ja);
+        std::vector<double> fp(6), fm(6);
+        for (int k = 0; k < 6; ++k) {
+            if (!p.sed && (k == DustModel::Z || k == DustModel::VZ)) continue;
+            const double hk = 1e-6 * std::max(std::abs(y[k]), 1e-3);
+            auto yp = y, ym = y;
+            yp[k] += hk;
+            ym[k] -= hk;
+            m.rhs(0, yp, fp);
+            m.rhs(0, ym, fm);
+            for (int i = 0; i < 6; ++i) {
+                const double fd = (fp[i] - fm[i]) / (2 * hk);
+                CAPTURE(p.a, p.r, i, k, fd, Ja(i, k));
+                CHECK(std::abs(Ja(i, k) - fd) <= 1e-5 * std::abs(fd) + 1e-7 * (1 + std::abs(Ja(i, i))));
+            }
+        }
+    }
+}

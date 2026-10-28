@@ -51,6 +51,16 @@ double Disk::beta(double r) const {
     return p_.beta_values[i - 1] + w * (p_.beta_values[i] - p_.beta_values[i - 1]);
 }
 
+double Disk::dbeta_dr(double r) const {
+    if (log_r_.empty()) return 0.0;
+    const double lr = std::log(r);
+    if (lr <= log_r_.front() || lr >= log_r_.back()) return 0.0;
+    const auto it = std::upper_bound(log_r_.begin(), log_r_.end(), lr);
+    const auto i = static_cast<std::size_t>(it - log_r_.begin());
+    // beta is linear in log r on each interval
+    return (p_.beta_values[i] - p_.beta_values[i - 1]) / (log_r_[i] - log_r_[i - 1]) / r;
+}
+
 bool Disk::beta_extrapolated(double r) const {
     return !log_r_.empty() && (r < p_.beta_r_au.front() || r > p_.beta_r_au.back());
 }
