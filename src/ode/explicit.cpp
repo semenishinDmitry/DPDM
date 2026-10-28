@@ -109,7 +109,6 @@ void Dopri5::init(Real t0, std::span<const Real> y0, Real h_guess) {
     window_fill_ = 0;
     rho_counter_ = rho_hits_ = 0;
     rho_last_ = 0;
-    stagnant_ = 0;
     // Dense output on the degenerate interval [t0, t0]: constant.
     r1_ = y_;
     std::fill(r2_.begin(), r2_.end(), 0);
@@ -276,16 +275,13 @@ Status Dopri5::step(Real t_bound) {
                 r5_[i] = h * (d1 * k1_[i] + d3 * k3_[i] + d4 * k4_[i] + d5 * k5_[i] + d6 * k6_[i] + d7 * k7_[i]);
             }
 
-            // Lost-increment diagnostics.
-            std::uint64_t lost = 0, nonzero = 0;
-            for (Index i = 0; i < n_; ++i) {
-                if (delta_[i] != 0) {
-                    ++nonzero;
-                    if (ynew_[i] == y_[i]) ++lost;
+            // Lost-increment diagnostics (the lost part stays in comp_, so this is
+            // not an error for DOPRI5).
+            for (Index i = 0; i < n_; ++i)
+                if (delta_[i] != 0 && ynew_[i] == y_[i]) {
+                    ++st.n_lost_increment;
+                    break;
                 }
-            }
-            if (lost) ++st.n_lost_increment;
-            stagnant_ = (nonzero > 0 && lost == nonzero) ? stagnant_ + 1 : 0;
 
             std::swap(y_, ynew_);
             std::swap(comp_, compnew_);
@@ -300,11 +296,6 @@ Status Dopri5::step(Real t_bound) {
             st.h_min = std::min(st.h_min, h);
             st.h_max = std::max(st.h_max, h);
             st.h_last = h;
-            if (opt.max_stagnant_steps && stagnant_ >= opt.max_stagnant_steps) {
-                detail_ = "all state increments lost to rounding for " + std::to_string(stagnant_) +
-                          " consecutive steps at t=" + std::to_string(t_);
-                return Status::TimeResolutionLost;
-            }
             return Status::Success;
         }
         // rejected

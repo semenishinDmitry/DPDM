@@ -40,7 +40,8 @@ Bdf::Bdf(StepContext& ctx)
     } else {
         gmres_.resize(n_, ctx.opt.gmres_restart);
     }
-    for (auto* v : {&y_, &y_predict_, &psi_, &d_, &y_new_, &f_, &dy_, &scale_, &err_, &rhs_, &w1_, &w2_, &w3_, &typ_})
+    for (auto* v : {&y_, &y_predict_, &psi_, &d_, &y_new_, &f_, &dy_, &scale_, &err_, &rhs_, &w1_, &w2_, &w3_, &typ_,
+                    &lost_acc_})
         v->assign(n_, 0);
     gamma_[0] = 0;
     for (int k = 1; k <= kMaxOrder; ++k) gamma_[k] = gamma_[k - 1] + Real{1} / k;
@@ -159,8 +160,28 @@ bool Bdf::solve_newton(Real t_new, Real c, Real tol, int& n_iter, bool& linear_f
         }
         const Real dy_norm = kernels::wrms(dy_.data(), scale_.data(), n_);
         if (!std::isfinite(dy_norm)) break;
+        // A correction far below the tolerance is converged (as in CVODE). Without
+        // this, near a steady state two successive round-off-level corrections give
+        // a "rate" ~ 1 and the step is rejected forever.
+        if (dy_norm <= 0.01 * tol) {
+            for (Index i = 0; i < n_; ++i) {
+                y_new_[i] += dy_[i];
+                d_[i] += dy_[i];
+            }
+            converged = true;
+            break;
+        }
         Real rate = -1;
         if (dy_norm_old > 0) rate = dy_norm / dy_norm_old;
+        // Noise floor: the iteration no longer contracts but the correction is already
+        // far below the error-test unit (3 %). This happens when a component's
+        // tolerance scale approaches the round-off level of its RHS (e.g. v_r -> 0 in
+        // a dust trap with a tiny atol): Newton cannot reach tol there, but its error
+        // is negligible for the local error, which the error test still checks.
+        if (rate >= 1 && dy_norm <= 0.03) {
+            converged = true;
+            break;
+        }
         if (rate >= 0 && (rate >= 1 || std::pow(rate, maxit - k) / (1 - rate) * dy_norm > tol)) break;
         for (Index i = 0; i < n_; ++i) {
             y_new_[i] += dy_[i];
@@ -208,7 +229,7 @@ void Bdf::init(Real t0, std::span<const Real> y0, Real h_guess) {
     dense_order_ = 1;
     n_equal_steps_ = 0;
     lu_valid_ = false;
-    stagnant_ = 0;
+    std::fill(lost_acc_.begin(), lost_acc_.end(), Real{0});
     const Real rtol = c_.opt.rtol;
     newton_tol_ = c_.opt.newton_tol > 0 ? c_.opt.newton_tol : std::max(10 * kEps / rtol, std::min(0.03, std::sqrt(rtol)));
     if (c_.opt.linear_solver == LinearSolverKind::DenseLU) compute_jacobian(t_, y_);
@@ -336,15 +357,19 @@ Status Bdf::step(Real t_bound) {
         }
         // accepted
         ++n_equal_steps_;
-        // lost increments (uses the last Newton RHS f_ as derivative estimate)
-        std::uint64_t lost = 0, nonzero = 0;
-        for (Index i = 0; i < n_; ++i)
-            if (f_[i] != 0 && h * f_[i] != 0) {
-                ++nonzero;
-                if (y_new_[i] == y_[i] && std::abs(h * f_[i]) > kEps * scale_[i]) ++lost;
+        // Lost increments (last Newton RHS f_ as derivative estimate). The signed
+        // sum is kept per component while the component does not change.
+        bool any_lost = false, harmful = false;
+        for (Index i = 0; i < n_; ++i) {
+            if (y_new_[i] != y_[i]) {
+                lost_acc_[i] = 0;
+            } else if (h * f_[i] != 0) {
+                any_lost = true;
+                lost_acc_[i] += h * f_[i];
+                if (std::abs(lost_acc_[i]) > scale_[i]) harmful = true;
             }
-        if (lost) ++st.n_lost_increment;
-        stagnant_ = (nonzero > 0 && lost == nonzero) ? stagnant_ + 1 : 0;
+        }
+        if (any_lost) ++st.n_lost_increment;
 
         t_old_ = t_;
         t_ = t_new;
@@ -366,8 +391,8 @@ Status Bdf::step(Real t_bound) {
         st.h_min = std::min(st.h_min, h);
         st.h_max = std::max(st.h_max, h);
         st.h_last = h;
-        if (opt.max_stagnant_steps && stagnant_ >= opt.max_stagnant_steps) {
-            detail_ = "all state increments lost to rounding for " + std::to_string(stagnant_) + " steps";
+        if (harmful && opt.fail_on_lost_increments) {
+            detail_ = "increments lost to rounding add up to more than the error tolerance at t=" + std::to_string(t_);
             return Status::TimeResolutionLost;
         }
 

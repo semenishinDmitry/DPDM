@@ -73,9 +73,13 @@ struct Options {
     // Output
     bool save_steps = true;   // record every accepted step
     std::vector<Real> t_eval; // additionally/alternatively record at these times (dense output)
-    // Lost-increment detection: also fail (Status::TimeResolutionLost) when
-    // all non-zero increments are lost for this many consecutive steps. 0 = never.
-    std::uint64_t max_stagnant_steps = 1000;
+    // Lost increments (y + dy == y with dy != 0) are always counted
+    // (Stats::n_lost_increment). They are harmless in a steady state and in DOPRI5,
+    // whose compensated summation carries the lost part to later steps. BDF has no
+    // such carry: if the signed sum of lost increments of a component exceeds its
+    // error scale (atol + rtol |y|), the result would be wrong by more than the
+    // tolerance, and Status::TimeResolutionLost is returned (unless disabled here).
+    bool fail_on_lost_increments = true;
 
     // Cooperative cancellation and progress (both optional, not owned).
     const std::atomic<bool>* cancel = nullptr;

@@ -55,29 +55,51 @@ TEST_CASE("NaN from the RHS is never propagated into accepted states", "[failure
     }
 }
 
-TEST_CASE("lost increments are detected; persistent stagnation is an error", "[failure][floating]") {
-    // y' = 1e-30, y(0) = 1: every increment (1e-30 * h) is far below ulp(1) / 2.
-    problems::TinyIncrement sys(1e-30);
-    const std::vector<Real> y0{1.0};
+TEST_CASE("lost increments: carried by DOPRI5, an error for BDF only when they matter", "[failure][floating]") {
+    // y' = 1e-10, y(0) = 1e8, h <= 1: each increment 1e-10 is below ulp(1e8)/2 = 7.5e-9.
+    problems::TinyIncrement sys(1e-10);
+    const std::vector<Real> y0{1e8};
     Options o;
-    o.method = Method::Rk4;
-    o.rk4_step = 1.0;
-    o.max_stagnant_steps = 50;
-    const auto r = integrate(sys, 0, y0, 1000, o);
-    // RK4 has no stagnation check (fixed step, verification only) -> runs through
-    CHECK(r.status == Status::Success);
-    o.method = Method::Dopri5;
     o.h_max = 1.0;
-    o.rtol = 1e-6;
-    o.atol = {1e-6};
-    const auto r2 = integrate(sys, 0, y0, 1000, o);
+    o.rtol = 1e-14;
+    o.atol = {1e-12};  // error scale ~1e-6: lost sum exceeds it after ~1e4 steps
+    o.save_steps = false;
+    o.method = Method::Dopri5;
+    const auto r1 = integrate(sys, 0, y0, 1e5, o);
+    REQUIRE(r1.status == Status::Success);
+    CHECK(r1.stats.n_lost_increment > 0);
+    // compensated summation delivers the exact result 1e8 + 1e-5 to within one ulp
+    CHECK(std::abs(r1.y_last[0] - (1e8 + 1e-5)) <= 1.5e-8);
+
+    o.method = Method::Bdf;
+    const auto r2 = integrate(sys, 0, y0, 1e5, o);
     CHECK(r2.status == Status::TimeResolutionLost);
-    CHECK(r2.stats.n_lost_increment >= 50);
     CHECK(r2.message.find("lost to rounding") != std::string::npos);
-    o.max_stagnant_steps = 0;  // diagnostic only
-    const auto r3 = integrate(sys, 0, y0, 1000, o);
+    o.fail_on_lost_increments = false;  // diagnostic only
+    const auto r3 = integrate(sys, 0, y0, 1e5, o);
     CHECK(r3.status == Status::Success);
     CHECK(r3.stats.n_lost_increment > 0);
+}
+
+TEST_CASE("a steady state with sub-ulp noise is not a failure", "[floating]") {
+    // y' = -(y - 1): converges to 1; afterwards increments are rounding noise.
+    class Relax final : public OdeSystem {
+    public:
+        [[nodiscard]] Index size() const override { return 1; }
+        void rhs(Real, std::span<const Real> y, std::span<Real> f) const override { f[0] = -(y[0] - 1.0); }
+    } sys;
+    const std::vector<Real> y0{2.0};
+    for (Method m : {Method::Dopri5, Method::Bdf}) {
+        Options o;
+        o.method = m;
+        o.rtol = 1e-12;
+        o.atol = {1e-14};
+        o.save_steps = false;
+        const auto r = integrate(sys, 0, y0, 1e6, o);
+        CAPTURE(to_string(m));
+        CHECK(r.status == Status::Success);
+        CHECK(std::abs(r.y_last[0] - 1.0) < 1e-12);
+    }
 }
 
 TEST_CASE("step underflow when |t| is so large that the needed h is unrepresentable", "[failure][floating]") {

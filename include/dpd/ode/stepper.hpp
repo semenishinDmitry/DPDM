@@ -83,10 +83,10 @@ private:
     int iasti_ = 0, nonsti_ = 0;
     std::uint64_t window_bits_ = 0;  // last <= 64 steps: 1 = stability-limited
     int window_fill_ = 0;
+    // (lost increments are carried by the compensated summation)
     int rho_counter_ = 0, rho_hits_ = 0;
     Real rho_last_ = 0;
     std::vector<Real> pv_, pjv_, pwork_;  // power-iteration workspace
-    std::uint64_t stagnant_ = 0;
     std::string stiff_reason_, detail_;
     std::vector<Real> y_, ynew_, comp_, compnew_, ytmp_, ysti_, delta_, err_;
     std::vector<Real> k1_, k2_, k3_, k4_, k5_, k6_, k7_;
@@ -150,7 +150,7 @@ private:
     int order_ = 1, n_equal_steps_ = 0, dense_order_ = 1;
     bool lu_valid_ = false, jac_current_ = false;
     Real lu_c_ = 0;
-    std::uint64_t stagnant_ = 0;
+    std::vector<Real> lost_acc_;  // signed sum of lost increments per component
     std::string detail_;
     Real gamma_[kMaxOrder + 1]{}, alpha_[kMaxOrder + 1]{}, error_const_[kMaxOrder + 2]{};
     DenseMatrix D_;      // (kMaxOrder + 3) x n difference array
