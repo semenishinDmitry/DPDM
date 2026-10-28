@@ -1,11 +1,63 @@
 # dustppd
 
-A C++20 ODE solver library (adaptive DOPRI5, variable-order BDF with dense-LU or
-Newton-Krylov/GMRES, automatic stiffness detection and switching) and an implementation
-of the dust-dynamics model of **V. A. Kobozeva (2025, SPbU)**, *"Numerical modeling of
-the dust particle dynamics in the accretion disks of young stars with fossil magnetic
-field"*: sedimentation, radial drift and coagulation of a single grain in an
-analytic accretion disk. With a CLI, Python bindings, a GUI, tests and benchmarks.
+Dust dynamics in accretion disks of young stars with a fossil magnetic field: a C++20
+ODE/SDE solver library (adaptive DOPRI5, variable-order BDF with dense-LU or
+Newton-Krylov/GMRES, automatic stiffness detection and switching) with a CLI, Python
+bindings, a browser GUI, desktop apps, tests and benchmarks.
+
+## Disk model: Dudorov and Khaibrakhmanov
+
+The gas disk is the MHD model of accretion disks of young stars by **A. E. Dudorov and
+S. A. Khaibrakhmanov**. It extends the Shakura-Sunyaev alpha-disk by the fossil
+large-scale magnetic field inherited from the parent molecular cloud core. The model
+includes Ohmic and ambipolar diffusion, magnetic buoyancy and the Hall effect, and the
+ionization by thermal and shock processes, cosmic rays and X-rays with recombination on
+grains. Weakly ionized "dead zones", where angular-momentum transport is inefficient,
+follow from it.
+
+- Dudorov A. E., Khaibrakhmanov S. A. Kinematic MHD model of accretion disks of young
+  stars. Analytic solution. Vestnik ChelGU, Fizika, 2013, No. 9 (300), 27-39 (in Russian).
+- Dudorov A. E., Khaibrakhmanov S. A. Fossil magnetic field of accretion disks of young
+  stars. Ap&SS, 2014, 352, 103-121.
+- Khaibrakhmanov S. A., Dudorov A. E., Parfenov S. Yu., Sobolev A. M. Large-scale
+  magnetic field in the accretion discs of young stars: the influence of magnetic
+  diffusion, buoyancy and Hall effect. MNRAS, 2017, 464, 586-598.
+- Khaibrakhmanov S. A., Dudorov A. E. Dynamics of magnetized accretion disks of young
+  stars. Astron. Zh., 2022, 99, 832-846 (in Russian).
+
+What is used here:
+
+- the **analytic solution**: power laws in r for T, rho, u_r and H, with the vertical
+  Gaussian density profile (`disk.model = "analytic"`);
+- the **deviation from Keplerian rotation** beta_K from the pressure gradient and the
+  magnetic tension of the fossil field, `r B_z B_r / (4 pi Sigma)`
+  (`disk.model = "self_consistent"`, optional dead-zone edge or pressure bump);
+- **numerical solutions** of the full model (code "Belmondo") as radial tables
+  (`disk.model = "tabulated"` or `"tabulated_beta"`). The tables are not public and are
+  not included.
+
+## Dust dynamics: Kobozeva (2025)
+
+The dust model follows **V. A. Kobozeva**, *"Numerical modeling of the dust particle
+dynamics in the accretion disks of young stars with fossil magnetic field"*, graduation
+thesis, St. Petersburg State University, 2025 (supervisor S. A. Khaibrakhmanov): one
+spherical grain in the Dudorov-Khaibrakhmanov disk under stellar gravity, Epstein/Stokes
+gas drag, centrifugal and Coriolis forces, with growth by sweeping up small dust.
+
+Done in this repository on the basis of that work:
+
+- the equations of motion (thesis Eqs. 11, 10) with both drag regimes, sedimentation,
+  radial drift and coagulation; unstated quantities (mean molecular weight, collision
+  cross-section, settling criterion) are calibrated from the thesis itself and
+  documented (`docs/physics_model.md`);
+- **reproduction of the thesis results**: Tables 1, 2 (grains >= 1 cm), 4, Fig. 12 and the
+  reference case (1 m body from 100 au: drift 304.7 kyr vs 306 kyr) within 5 %; the
+  cases that differ are listed, not hidden (`docs/validation.md`,
+  `docs/reference_case.md`); an independent SciPy implementation agrees to 2e-6;
+- **extensions beyond the thesis** (`docs/science_extensions.md`): dust traps at
+  dead-zone edges and their suppression by the fossil field, stochastic vertical
+  turbulent mixing (SDE) against the Dubrulle formula, charged grains with the Lorentz
+  force (OML charge, Hall parameter).
 
 ## Quick start
 
